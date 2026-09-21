@@ -87,6 +87,20 @@ func Run(args []string, w io.Writer) int {
 	}
 	e.line(status)
 
+	// Green run of a recognised test runner: the per-package/per-test "ok" list
+	// is the least useful output there is. Keep the summary, keep the spill.
+	if exit == 0 && total > 8 {
+		if kind, summary := summarize(argv, path); kind != "generic" && len(summary) > 0 {
+			e.linef("full: %s", path)
+			e.section("summary (" + kind + ")")
+			e.lines(summary)
+			e.linef("next: bound read %s   (passing output; usually not needed)", path)
+			delivered := e.flush(w)
+			ledger("run", size, delivered, argv[0])
+			return exit
+		}
+	}
+
 	// Small output: show verbatim, nothing hidden.
 	if total <= lines && size <= int64(l.RunChars)*2/3 {
 		head, _, _ := headTail(path, total, 0)
@@ -201,7 +215,7 @@ var (
 
 func parseGo(r io.Reader) []string {
 	var fails, pkgs, build, panics []string
-	okN, failN := 0, 0
+	okN, failN, noTest := 0, 0, 0
 	lastFail := -1
 	pending := "" // location seen after "=== RUN" but before "--- FAIL" (-v mode)
 	loc := func(m []string) string {
@@ -240,6 +254,8 @@ func parseGo(r io.Reader) []string {
 			case "FAIL":
 				failN++
 				pkgs = append(pkgs, line)
+			case "?":
+				noTest++
 			}
 			lastFail = -1
 			continue
@@ -252,7 +268,7 @@ func parseGo(r io.Reader) []string {
 			build = append(build, line)
 		}
 	}
-	out := []string{fmt.Sprintf("packages ok=%d fail=%d  tests failed=%d", okN, failN, len(fails))}
+	out := []string{fmt.Sprintf("packages ok=%d fail=%d notest=%d  tests failed=%d", okN, failN, noTest, len(fails))}
 	out = append(out, capLines(fails, 25)...)
 	out = append(out, panics...)
 	if len(build) > 0 {

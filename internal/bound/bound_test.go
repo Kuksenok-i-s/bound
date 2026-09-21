@@ -124,7 +124,7 @@ FAIL	example.com/auth	0.123s
 ok  	example.com/util	0.010s
 `
 	got := parseGo(strings.NewReader(goOut))
-	if len(got) < 3 || !strings.Contains(got[0], "ok=1 fail=1") || !strings.Contains(got[1], "TestRefresh") || !strings.Contains(got[1], "refresh_test.go:88") {
+	if len(got) < 3 || !strings.Contains(got[0], "ok=1 fail=1 notest=0") || !strings.Contains(got[1], "TestRefresh") || !strings.Contains(got[1], "refresh_test.go:88") {
 		t.Fatalf("go parser: %q", got)
 	}
 

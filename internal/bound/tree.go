@@ -40,15 +40,23 @@ func Tree(args []string, w io.Writer) int {
 		}
 		rel, _ := filepath.Rel(root, p)
 		level := strings.Count(rel, string(filepath.Separator))
+		if level >= depth {
+			return nil // shouldn't happen: parents at depth-1 are skipped below
+		}
 		if d.IsDir() {
 			if skip[d.Name()] || (strings.HasPrefix(d.Name(), ".") && flags["all"] != "true") {
 				skipped++
 				return filepath.SkipDir
 			}
 			dirs++
-			if level >= depth {
+			if level == depth-1 {
+				// Last visible level: show the directory with its entry count, don't descend.
+				n := 0
+				if ents, err := os.ReadDir(p); err == nil {
+					n = len(ents)
+				}
 				if shown < max {
-					out = append(out, fmt.Sprintf("%s%s/ …", strings.Repeat("  ", level), d.Name()))
+					out = append(out, fmt.Sprintf("%s%s/ (%d)", strings.Repeat("  ", level), d.Name(), n))
 					shown++
 				}
 				return filepath.SkipDir
