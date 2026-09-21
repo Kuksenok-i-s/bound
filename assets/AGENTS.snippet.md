@@ -1,14 +1,25 @@
 ## Context budget (bound)
 
-- Before a non-trivial task: interview the user (≤10 questions, one message), write a
-  Task Card (goal, done-check, scope in/out, verify command), work from it.
-- Explore narrow → wide: named files, then imports/callers/tests, then package, then repo.
-  Prefer SocratiCode `codebase_symbols` / `codebase_symbol` / `codebase_impact` over grep+read.
-- Run tests, builds, searches, logs and diffs through `bound` (`bound run -- <cmd>`,
-  `bound grep`, `bound read <file> A:B`, `bound diff`, `bound log --tail 300`).
-  Never `cat` a spill file; use `bound read <spill> --grep RE -C 6`.
-- Files > 500 lines: outline first, then ranges. Searches: refine, don't page.
-- Never re-read unchanged files or re-run unchanged commands.
-- Multi-step data work: one script in /tmp, run once, read only its stdout.
-- When the session is large or a phase ends: emit a compact HANDOFF and suggest a new session.
-- Report findings, edits, tests, blockers. Skip narration.
+- Minimize total work for a correct result. Ask only about consequential ambiguity;
+  clear tasks need no interview. Keep any task card to three lines, without an extra file.
+- Explore named files → callers/tests → package → repo. Use SocratiCode for navigation,
+  verify source before editing, and follow the shared indexing/refresh policy.
+- Bound noisy output with `bound run`, `bound grep`, `bound read`, `bound diff`, and
+  `bound log`. Keep small outputs intact. Read relevant spill ranges, not whole spills.
+- Use outlines and targeted ranges for large files; consider bytes as well as lines.
+- Reuse evidence; rerun for changed inputs, transient failures, external changes,
+  or necessary verification. Keep structured intermediate data on disk.
+- Verify proportionately and finish the task. Checkpoint when useful; do not stop
+  merely because a phase ended or context was compacted.
+- Define the required outcome/checks (DoD); each call must resolve a question or
+  unmet check. Batch independent reads/checks and avoid fragmented writes.
+- Read once by default and reuse unchanged evidence. Reread for changes, truncation,
+  new relevant ranges, or exact source needed for safe edits; do not over-read upfront.
+- Stop when DoD checks pass unless new evidence reveals a problem. Keep this internal.
+- Discover existing repository tools once; reuse the command/scope map until relevant
+  config changes. After coherent edits, run affected checks in one bounded batch,
+  formatting first. Preserve per-check failures and full logs; summarize successes.
+- Filter file-aware checks to changed files; scope compilers/builds/tests to affected
+  projects and dependents. Widen when impact or required CI warrants it. Reuse green
+  results until their inputs change. Use scripts/codemods for mechanical changes.
+- Report outcomes, checks, and blockers. Byte counts are not actual token usage.

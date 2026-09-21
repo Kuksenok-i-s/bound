@@ -60,7 +60,7 @@ What this writes (merged into existing files, idempotent):
 | Claude Code | `~/.claude/settings.json`  | `PreToolUse` `Bash\|Read\|Grep`  | `~/.claude/skills/`     |
 | Codex       | `~/.codex/hooks.json`      | `PreToolUse` `Bash`             | `~/.agents/skills/`     |
 
-Skills installed: `bound` (context budget, interview, handoff) and `proto` (HTML
+Skills installed: `bound` (bounded output, targeted exploration, verification) and `proto` (HTML
 prototyping workflow). Use `--agent cursor|claude|codex` for one host, `--no-skills` to
 skip skills.
 

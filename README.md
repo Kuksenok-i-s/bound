@@ -7,8 +7,8 @@ Linux, macOS, Windows.
 shell) and the commands it runs. Every subcommand returns a fixed-size envelope and writes
 the full artifact to disk, so a test run, a search, a diff or a log can never dump
 hundreds of kilotokens into the model's context. A pre-tool hook rewrites heavy shell
-commands transparently. Two skills teach the agent the protocol: `bound` (interview, scope,
-handoff) and `proto` (token-frugal HTML prototyping).
+commands transparently. Two skills teach the agent the protocol: `bound` (targeted exploration, bounded output,
+proportionate verification) and `proto` (token-frugal HTML prototyping).
 
 ## Quick start
 
@@ -34,18 +34,17 @@ Install and configure bound following https://raw.githubusercontent.com/Kuksenok
 
 ## Why
 
-Independent measurements in 2026 ([JetBrains](https://blog.jetbrains.com/ai/2026/07/rtk-claude-code-token-savings/),
-[Quesma](https://quesma.com/blog/does-rtk-make-ai-coding-cheaper/),
-[arXiv 2607.12161](https://arxiv.org/html/2607.12161)) show that an agent session's bill is
-dominated by prompt-cache traffic: prefix size × number of turns. Compressing shell output
-alone does not lower the bill and raises it when compression causes a retry. What works:
+Large tool results and repeated turns grow context. Smaller outputs help only when
+agents retain enough evidence to finish correctly; extra questions, retries, and
+workflow artifacts can offset the reduction.
 
-1. No spikes: a single tool result never exceeds a hard ceiling.
-2. Fewer turns: filter in code before results reach the model; print the exact next command.
-3. Fresh sessions: fix scope up front (interview), hand off before the prefix gets expensive.
+1. Bound noisy outputs and retain full diagnostics on disk.
+2. Reuse evidence and transform structured data outside model context.
+3. Ask only about consequential ambiguity and continue through verification.
 
-`bound` implements 1 and 2 as a tool, 3 as a skill. It does **not** do lossy compression:
-failing lines are verbatim, exit codes preserved, the full artifact path always printed.
+`bound stats` reports bytes, not provider token usage or billing savings. Measure
+input, output, and cache tokens across all agents, with task, model, hooks, and
+verification held constant; assess result quality as well.
 
 ## Commands
 
@@ -131,11 +130,18 @@ Host notes:
 Installed to `~/.cursor/skills/`, `~/.claude/skills/`, `~/.agents/skills/`. They load only
 when the agent decides a task needs them.
 
-**`bound`** — before a non-trivial task, a ≤10-question interview in one message producing
-a Task Card (goal, done-check, scope in/out, verify command, budget); exploration order
-narrow → wide; SocratiCode `codebase_symbols` → `codebase_symbol` → `codebase_impact`
-instead of grep+read; bounded git; the `bound` protocol; "one script in /tmp, read only its
-stdout" for multi-step data work; HANDOFF format for large sessions.
+**`bound`** — skip unnecessary interviews; keep any task card to three lines;
+explore narrowly with source verification; bound noisy output; reuse evidence with
+justified reruns; verify proportionately and complete the task. Phase boundaries
+and compaction do not require stopping. Read once by default and reuse unchanged
+evidence, with justified rereads for changes, missing context, or safe edits. Each
+call should resolve an open question or unmet Definition of Done check; batch
+independent work and stop when required checks pass. Keep this reasoning internal.
+Discover repository tools once and reuse their command/scope map. Batch affected
+checks after coherent edits, retain full logs, and report compact per-check results.
+Filter file-aware checks to changed files; use affected package/project scopes for
+compilers, builds, and tests, widening when required. Use scripts for mechanical
+transformations. Use provider counters for token comparisons.
 
 **`proto`** — HTML prototypes for pre-production research with an existing design system
 and sample data. Mockup pages are output tokens (≈5× input) that then sit in context every
