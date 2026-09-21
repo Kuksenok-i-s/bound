@@ -75,18 +75,21 @@ func Init(args []string, w io.Writer) int {
 	}
 
 	if flags["no-skills"] != "true" {
-		skill, _ := assets.FS.ReadFile("skill/SKILL.md")
-		targets := map[string]string{
-			"cursor": filepath.Join(base(".cursor"), "skills", "bound", "SKILL.md"),
-			"claude": filepath.Join(base(".claude"), "skills", "bound", "SKILL.md"),
-			"codex":  filepath.Join(base(".agents"), "skills", "bound", "SKILL.md"),
+		roots := map[string]string{
+			"cursor": filepath.Join(base(".cursor"), "skills"),
+			"claude": filepath.Join(base(".claude"), "skills"),
+			"codex":  filepath.Join(base(".agents"), "skills"),
 		}
-		for a, p := range targets {
+		for _, a := range []string{"cursor", "claude", "codex"} {
 			if !want(a) {
 				continue
 			}
-			err := writeFile(p, skill, dry)
-			failed += done(report, a+" skill", p, err, dry)
+			for src, name := range assets.Skills {
+				body, _ := assets.FS.ReadFile(src)
+				p := filepath.Join(roots[a], name, "SKILL.md")
+				err := writeFile(p, body, dry)
+				failed += done(report, a+" skill "+name, p, err, dry)
+			}
 		}
 	}
 	if flags["agents-md"] == "true" {

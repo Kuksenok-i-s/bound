@@ -1,0 +1,24 @@
+
+# Managed SocratiCode local knowledge exclusions
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.ovpn
+*.sswan
+*credentials*.json
+*service-account*.json
+phone-vless-reality.txt
+anyconnect-connection.txt
+.pio/
+__MACOSX/
+Photos_8tb/
+temp_bc/
+socraticode-admin/
+vendor/
+*.backup-*
+**/booking-api/

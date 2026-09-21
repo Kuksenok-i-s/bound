@@ -156,6 +156,24 @@ func TestOutlineAndRange(t *testing.T) {
 	}
 }
 
+func TestHTMLOutline(t *testing.T) {
+	dir := t.TempDir()
+	page := "<!doctype html>\n<html>\n<head>\n<link rel=\"stylesheet\" href=\"ds.css\">\n</head>\n<body>\n<nav class=\"top\">\n<a href=\"#\">x</a>\n</nav>\n<main>\n<h1>Orders</h1>\n<p>text</p>\n<p>more</p>\n<table id=\"orders\">\n<tr><td>1</td></tr>\n</table>\n<div id=\"empty-state\">none</div>\n</main>\n<template id=\"row\"><tr></tr></template>\n</body>\n</html>\n"
+	p := filepath.Join(dir, "orders.html")
+	_ = os.WriteFile(p, []byte(page), 0o644)
+	got := strings.Join(outline(p, 100), "\n")
+	for _, want := range []string{"<link", "<nav", "<main", "<h1>Orders", `id="orders"`, `id="empty-state"`, "<template"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("outline missing %q:\n%s", want, got)
+		}
+	}
+	for _, no := range []string{"<p>text", "<td>1", "<a href"} {
+		if strings.Contains(got, no) {
+			t.Errorf("outline should not include %q", no)
+		}
+	}
+}
+
 func TestHookClaudeShellRewrite(t *testing.T) {
 	in := `{"tool_name":"Bash","tool_input":{"command":"go test -v ./...","description":"run"},"cwd":"/tmp"}`
 	var out bytes.Buffer

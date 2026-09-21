@@ -200,6 +200,9 @@ var outlineRules = map[string]*regexp.Regexp{
 	".sql":   regexp.MustCompile(`(?i)^\s*(create|alter|drop)\s+.*`),
 	".tf":    regexp.MustCompile(`^(resource|module|variable|output|data|provider|locals)\b.*`),
 	".proto": regexp.MustCompile(`^\s*(message|service|enum|rpc)\s+\w+.*`),
+	// pages: structure only (headings, landmarks, forms, templates, anything with an id)
+	".html": regexp.MustCompile(`(?i)^\s*<(h[1-6]|header|nav|main|section|article|aside|footer|form|table|dialog|template|script|style|link)\b|\sid="[^"]+"`),
+	".pug":  regexp.MustCompile(`^\s*(h[1-6]|header|nav|main|section|article|aside|footer|form|table|dialog|template|mixin|block|extends|include|script|style)\b|^\s*\w*#[\w-]+`),
 }
 
 func init() {
@@ -211,6 +214,10 @@ func init() {
 	outlineRules[".bash"] = outlineRules[".sh"]
 	outlineRules[".zsh"] = outlineRules[".sh"]
 	outlineRules[".scala"] = outlineRules[".kt"]
+	outlineRules[".htm"] = outlineRules[".html"]
+	outlineRules[".vue"] = outlineRules[".html"]
+	outlineRules[".svelte"] = outlineRules[".html"]
+	outlineRules[".jade"] = outlineRules[".pug"]
 }
 
 // outline lists declarations with line numbers, capped to max entries.

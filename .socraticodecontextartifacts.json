@@ -1,0 +1,9 @@
+{
+  "artifacts": [
+    {
+      "name": "agent-knowledge",
+      "path": "/home/ilya/.local/share/socraticode-knowledge/e5353e7bab044e10",
+      "description": "Project source inventory and extracted documents with original source paths; refresh using socraticode-refresh."
+    }
+  ]
+}

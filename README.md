@@ -116,6 +116,21 @@ covers: a ≤10-question interview producing a Task Card, exploration order, Soc
 (`codebase_symbols` → `codebase_symbol` → `codebase_impact` instead of grep+read), git
 usage, the `bound` protocol, and the handoff format.
 
+## The `proto` skill (HTML prototypes)
+
+Mockup pages are output tokens (≈5× input price) that then sit in context on every later
+turn. `assets/skill-proto/SKILL.md` enforces a workflow for pre-production HTML research
+with an existing design system and sample data:
+
+1. interview (≤7 questions) → 2. spec, approved by a human → 3. reusable primitives +
+`INDEX.md`, written once by the strong model → 4. page assembly delegated to a cheap model
+that receives only the spec section and the index → 5. human review: one yes/no question;
+on "no", ≤5 targeted questions, then spec update / primitive fix / re-assemble one section.
+
+Hard rules: no markup before primitives exist, design-system classes only, sample data by
+reference, shell written once, search-replace edits only, never read a page back
+(`bound read page.html` outlines headings, landmarks, forms, templates and ids instead).
+
 ## Measuring
 
 `bound stats` shows raw vs delivered bytes per kind (chars/4 estimate). It is **not** your
