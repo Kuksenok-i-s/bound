@@ -26,6 +26,7 @@ usage: bound <command> [flags] [args]
   hook  <cursor|claude|codex>                          pre-tool hook adapter (stdin JSON)
   init  [--agent all|cursor|claude|codex] [--project] [--no-skills] [--agents-md] [--dry-run]
   stats [--clean]                                      raw vs delivered bytes, spill files
+  doctor                                               verify install: binary, hooks, skills, tools
   version
 
 env: BOUND_DIR (spill dir, default $TMPDIR/bound), BOUND_RUN_LINES, BOUND_GREP_MAX,
@@ -38,8 +39,11 @@ func main() {
 		os.Exit(2)
 	}
 	args := os.Args[2:]
+	bound.SetVersion(version)
 	var code int
 	switch os.Args[1] {
+	case "doctor":
+		code = bound.Doctor(args, os.Stdout)
 	case "run":
 		code = bound.Run(args, os.Stdout)
 	case "grep":
