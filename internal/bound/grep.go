@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -144,7 +147,7 @@ func inKept(kept []match, m match) bool {
 }
 
 func runSearch(flags map[string]string, pattern string, paths []string) ([]byte, string, error) {
-	if rg, err := exec.LookPath("rg"); err == nil {
+	if rg, err := exec.LookPath("rg"); err == nil && os.Getenv("BOUND_NO_RG") == "" {
 		argv := []string{"-n", "--no-heading", "-H", "--color", "never", "--max-columns", "300", "--max-columns-preview"}
 		if flags["i"] == "true" {
 			argv = append(argv, "-i")
@@ -180,35 +183,90 @@ func runSearch(flags map[string]string, pattern string, paths []string) ([]byte,
 		}
 		return out, "rg", err
 	}
-	argv := []string{"-rnI", "--color=never"}
-	if flags["i"] == "true" {
-		argv = append(argv, "-i")
+	out, err := walkSearch(flags, pattern, paths)
+	return out, "walk", err
+}
+
+// walkSearch is the dependency-free fallback: a regexp walk over the tree
+// honouring the same ignore lists and flags, emitting rg-style file:line:text.
+func walkSearch(flags map[string]string, pattern string, paths []string) ([]byte, error) {
+	expr := pattern
+	if flags["F"] == "true" {
+		expr = regexp.QuoteMeta(expr)
 	}
 	if flags["w"] == "true" {
-		argv = append(argv, "-w")
+		expr = `\b(?:` + expr + `)\b`
 	}
-	if flags["F"] == "true" {
-		argv = append(argv, "-F")
-	} else {
-		argv = append(argv, "-E")
+	if flags["i"] == "true" || (flags["i"] != "true" && strings.ToLower(pattern) == pattern) {
+		expr = "(?i)" + expr // smart case, like rg -S
 	}
+	rx, err := regexp.Compile(expr)
+	if err != nil {
+		return nil, err
+	}
+	ext := ""
 	if t, ok := flags["t"]; ok {
-		argv = append(argv, "--include=*."+strings.TrimPrefix(t, "."))
+		ext = "." + strings.TrimPrefix(t, ".")
 	}
-	if g, ok := flags["g"]; ok {
-		argv = append(argv, "--include="+g)
-	}
+	glob := flags["g"]
+	skipDir := map[string]bool{}
 	for _, d := range ignoredDirs {
-		argv = append(argv, "--exclude-dir="+d)
+		skipDir[d] = true
 	}
-	for _, g := range ignoredGlobs {
-		argv = append(argv, "--exclude="+g)
+	var buf bytes.Buffer
+	const maxFile = 4 << 20
+	for _, root := range paths {
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := d.Name()
+			if d.IsDir() {
+				if p != root && (skipDir[name] || (strings.HasPrefix(name, ".") && flags["hidden"] != "true")) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if ext != "" && !strings.EqualFold(filepath.Ext(name), ext) {
+				return nil
+			}
+			if glob != "" {
+				if ok, _ := filepath.Match(glob, name); !ok {
+					return nil
+				}
+			}
+			for _, g := range ignoredGlobs {
+				if ok, _ := filepath.Match(g, name); ok {
+					return nil
+				}
+			}
+			info, err := d.Info()
+			if err != nil || info.Size() > maxFile {
+				return nil
+			}
+			f, err := os.Open(p)
+			if err != nil {
+				return nil
+			}
+			defer f.Close()
+			s := scanner(f)
+			n := 0
+			for s.Scan() {
+				n++
+				line := s.Bytes()
+				if n == 1 && bytes.IndexByte(line, 0) >= 0 {
+					return nil // binary
+				}
+				if rx.Match(line) {
+					t := string(line)
+					if len(t) > 300 {
+						t = t[:300]
+					}
+					fmt.Fprintf(&buf, "%s:%d:%s\n", p, n, t)
+				}
+			}
+			return nil
+		})
 	}
-	argv = append(argv, "-e", pattern, "--")
-	argv = append(argv, paths...)
-	out, err := exec.Command("grep", argv...).Output()
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-		err = nil
-	}
-	return out, "grep", err
+	return buf.Bytes(), nil
 }

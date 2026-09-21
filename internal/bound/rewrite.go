@@ -19,7 +19,7 @@ type Decision struct {
 func Self() string {
 	if p, err := os.Executable(); err == nil {
 		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return r
+			p = r
 		}
 		return p
 	}
@@ -56,7 +56,7 @@ var (
 
 // RewriteShell decides what to do with a shell command the agent is about to run.
 func RewriteShell(cmd string, cwd string, l Limits) Decision {
-	self := Self()
+	self := quoteForHook(Self())
 	trimmed := strings.TrimSpace(cmd)
 	if trimmed == "" || strings.Contains(trimmed, "bound ") || strings.HasPrefix(trimmed, self) {
 		return Decision{Action: "allow"}
@@ -87,8 +87,8 @@ func RewriteShell(cmd string, cwd string, l Limits) Decision {
 	}
 
 	switch name {
-	case "cat", "less", "more", "bat", "head", "tail":
-		if f, ok := singleFile(base[1:], cwd); ok && (name == "cat" || name == "less" || name == "more" || name == "bat") {
+	case "cat", "less", "more", "bat", "head", "tail", "type", "Get-Content", "gc":
+		if f, ok := singleFile(base[1:], cwd); ok && name != "head" && name != "tail" {
 			return Decision{Action: "rewrite", Command: self + " read " + quoteWord(f), Reason: "file read routed through bound read (outline for big files)"}
 		}
 		return Decision{Action: "allow"}
@@ -116,6 +116,9 @@ func RewriteShell(cmd string, cwd string, l Limits) Decision {
 			return Decision{Action: "rewrite", Command: self + " run -- " + ShellQuote(argv), Reason: "dropped -v from repo-wide go test; failures are still reported in full"}
 		}
 	case "find":
+		if isWindows { // cmd.exe `find` is a string filter, not a file walker
+			return Decision{Action: "allow"}
+		}
 		if len(base) == 1 || (len(base) >= 2 && (base[1] == "." || base[1] == "/")) && !contains(base, "-maxdepth") && !contains(base, "-name") && !contains(base, "-path") {
 			return Decision{Action: "rewrite", Command: self + " tree " + strings.Join(base[1:min(len(base), 2)], " "), Reason: "unfiltered find routed through bound tree (depth 3, 500 entries)"}
 		}

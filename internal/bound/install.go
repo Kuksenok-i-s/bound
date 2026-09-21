@@ -22,7 +22,7 @@ func Init(args []string, w io.Writer) int {
 	}
 	dry := flags["dry-run"] == "true"
 	project := flags["project"] == "true"
-	self := Self()
+	self := quoteForHook(Self())
 	home, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
 

@@ -1,6 +1,7 @@
 # bound
 
 Bounded tool output for coding agents. One static Go binary, no dependencies.
+Linux, macOS, Windows.
 
 `bound` sits between an agent (Cursor, Claude Code, Codex, cloud agents, anything with a
 shell) and the commands it runs. Every subcommand returns a fixed-size envelope and writes
@@ -122,6 +123,8 @@ Host notes:
   so `cat` rewriting covers reads. Run `/hooks` once to trust the hook.
 - Others (Gemini CLI, OpenCode, cloud sandboxes): commit the project hooks and the
   `AGENTS.md` section, install the binary in the environment; the agent calls `bound` directly.
+- Windows: same files under `%USERPROFILE%`; hook commands carry the quoted `bound.exe`
+  path; `-c` uses PowerShell; the rewriter parses backslash paths and skips cmd's `find`.
 
 ## Skills
 

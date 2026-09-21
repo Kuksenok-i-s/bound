@@ -35,6 +35,39 @@ func TestSimpleArgv(t *testing.T) {
 	}
 }
 
+func TestSimpleArgvWindows(t *testing.T) {
+	got, ok := simpleArgv(`go test .\internal\... -run "TestA B"`, true)
+	if !ok || len(got) != 5 || got[2] != `.\internal\...` || got[4] != "TestA B" {
+		t.Fatalf("windows argv: %q ok=%v", got, ok)
+	}
+	if _, ok := simpleArgv(`dir | findstr x`, true); ok {
+		t.Fatal("pipe must not be simple on windows")
+	}
+	if _, ok := simpleArgv(`echo %PATH%`, true); ok {
+		t.Fatal("env expansion must not be simple on windows")
+	}
+}
+
+func TestWalkSearch(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "node_modules", "x"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "node_modules", "x", "a.js"), []byte("needle\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "a.go"), []byte("x\nNeedle here\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "b.txt"), []byte("needle\n"), 0o644)
+	out, err := walkSearch(map[string]string{"t": "go"}, "needle", []string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "a.go:2:Needle here") || strings.Contains(s, "node_modules") || strings.Contains(s, "b.txt") {
+		t.Fatalf("walk output: %q", s)
+	}
+	out, _ = walkSearch(map[string]string{}, "needle", []string{dir})
+	if strings.Count(string(out), "\n") != 2 {
+		t.Fatalf("expected 2 matches without -t: %q", out)
+	}
+}
+
 func TestRewriteShell(t *testing.T) {
 	l := DefaultLimits()
 	dir := t.TempDir()

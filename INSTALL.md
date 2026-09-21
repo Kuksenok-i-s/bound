@@ -3,8 +3,8 @@
 Two audiences. Humans: read Part A. Agents (Cursor, Claude Code, Codex, cloud agents):
 Part B is written to be executed as-is.
 
-Requirements: Go 1.22+ (`go version`). Optional: `rg` (faster search), `ctags` (better
-outlines). Linux, macOS, WSL, Windows (hooks on Windows are untested).
+Requirements: Go 1.22+ (`go version`). Optional: `rg` (faster search; without it `bound
+grep` uses a built-in walker), `ctags` (better outlines). Linux, macOS, WSL, Windows.
 
 ---
 
@@ -23,6 +23,25 @@ binary by absolute path, so PATH is only needed for you and the agent to type `b
 # if `which bound` prints nothing:
 ln -s "$(go env GOPATH)/bin/bound" ~/.local/bin/bound      # or add ~/go/bin to PATH
 ```
+
+#### Windows (PowerShell)
+
+```powershell
+winget install GoLang.Go          # if `go version` fails; reopen the terminal afterwards
+go install github.com/Kuksenok-i-s/bound@latest
+bound version                      # the Go installer puts %USERPROFILE%\go\bin on PATH
+```
+
+If `bound` is not found: `$env:Path += ";$(go env GOPATH)\bin"` for this session, and add
+`%USERPROFILE%\go\bin` to the user PATH permanently (Settings → Environment Variables).
+
+Everything below is identical on Windows. Config files live under `%USERPROFILE%`
+(`~\.cursor\hooks.json`, `~\.claude\settings.json`, `~\.codex\hooks.json`), hook commands
+are stored with the quoted absolute `bound.exe` path, `bound run -c` uses PowerShell
+(`pwsh`, then `powershell`, then `cmd`), and the command rewriter understands
+backslash paths and PowerShell quoting. Claude Code on Windows requires Git for Windows;
+its hooks run through Git Bash, which handles the quoted path too. Spill files go to
+`%TEMP%\bound`.
 
 ### 2. Wire the hooks and skills
 
@@ -98,14 +117,15 @@ not name. Stop and report if a step fails after one retry.
 
 ```sh
 go version || echo NO_GO
-which rg || echo NO_RG
 ```
 
 - `NO_GO`: report to the user that Go 1.22+ is required and stop. Do not install Go
   without being asked.
-- `NO_RG`: fine, `bound grep` falls back to `grep -r`.
+- `rg` is optional; `bound grep` has a built-in fallback.
 
 ### B2. Install
+
+POSIX shell (Linux, macOS, WSL, Git Bash):
 
 ```sh
 go install github.com/Kuksenok-i-s/bound@latest
@@ -118,8 +138,15 @@ If `bound` is not on PATH and `~/.local/bin` exists and is on PATH:
 ln -sf "$(go env GOPATH)/bin/bound" ~/.local/bin/bound
 ```
 
-Otherwise use `$BOUND_BIN` explicitly in the remaining steps; hooks store the absolute
-path themselves.
+Windows PowerShell:
+
+```powershell
+go install github.com/Kuksenok-i-s/bound@latest
+$BOUND_BIN = "$(go env GOPATH)\bin\bound.exe"; & $BOUND_BIN version
+```
+
+In the steps below, replace `"$BOUND_BIN"` with `& $BOUND_BIN` on PowerShell. Hooks store
+the absolute path themselves, so PATH is not required for them to work.
 
 ### B3. Wire hooks and skills
 

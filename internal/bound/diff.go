@@ -115,8 +115,8 @@ func Diff(args []string, w io.Writer) int {
 }
 
 func git(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Env = append(os.Environ(), "GIT_PAGER=cat", "PAGER=cat")
+	cmd := exec.Command("git", append([]string{"--no-pager"}, args...)...)
+	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

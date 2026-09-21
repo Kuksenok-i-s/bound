@@ -27,7 +27,7 @@ func Run(args []string, w io.Writer) int {
 		return 2
 	}
 	if flags["c"] == "true" || (len(argv) == 1 && strings.ContainsAny(argv[0], " |&;<>$`")) {
-		argv = []string{"/bin/sh", "-c", strings.Join(argv, " ")}
+		argv = shellArgv(strings.Join(argv, " "))
 	}
 	timeout := 10 * time.Minute
 	if v, ok := flags["timeout"]; ok {
@@ -50,7 +50,7 @@ func Run(args []string, w io.Writer) int {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = spill
 	cmd.Stderr = spill
-	cmd.Env = append(os.Environ(), "NO_COLOR=1", "FORCE_COLOR=0", "TERM=dumb", "CLICOLOR=0", "GIT_PAGER=cat", "PAGER=cat")
+	cmd.Env = append(os.Environ(), "NO_COLOR=1", "FORCE_COLOR=0", "TERM=dumb", "CLICOLOR=0", "GIT_PAGER=", "PAGER=")
 	cmd.WaitDelay = 2 * time.Second
 	start := time.Now()
 	runErr := cmd.Run()
