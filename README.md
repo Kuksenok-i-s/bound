@@ -27,6 +27,14 @@ bound init --project --agents-md
 
 Full walkthrough for humans and a copy-paste block for agents: **[INSTALL.md](INSTALL.md)**.
 
+Prebuilt binaries are available from the **[Build workflow](https://github.com/Kuksenok-i-s/bound/actions/workflows/build.yml)**.
+Open a successful run and download its `bound-<commit>` artifact. It contains
+Linux, macOS and Windows builds for amd64/arm64 (`.tar.gz` or `.zip`), an archive
+of the exact source commit, `BUILDINFO.txt` and `SHA256SUMS`. Extract the archive
+for your platform and run `bound version`; Go is only needed to build from source.
+The workflow verifies Go 1.22 and the current stable Go version before packaging.
+Artifacts are retained for 90 days; the workflow can also be run manually.
+
 Give this to an agent to have it install itself:
 
 ```text

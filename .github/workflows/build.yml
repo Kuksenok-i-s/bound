@@ -1,0 +1,120 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22.x', 'stable']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: Format, vet and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+
+  build:
+    name: Package binaries and sources
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 'stable'
+          cache: false
+      - name: Build and archive all targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          bound_revision="$(git rev-parse HEAD)"
+          bound_version="${bound_revision:0:12}"
+          mkdir -p dist
+          for bound_target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            bound_goos="${bound_target%/*}"
+            bound_goarch="${bound_target#*/}"
+            bound_package="bound-${bound_version}-${bound_goos}-${bound_goarch}"
+            bound_stage="${RUNNER_TEMP}/${bound_package}"
+            bound_ext=''
+            if [ "$bound_goos" = windows ]; then
+              bound_ext='.exe'
+            fi
+            mkdir -p "$bound_stage"
+            CGO_ENABLED=0 GOOS="$bound_goos" GOARCH="$bound_goarch" \
+              go build -trimpath -ldflags "-s -w -X main.version=${bound_version}" \
+              -o "${bound_stage}/bound${bound_ext}" .
+            cp README.md INSTALL.md LICENSE "$bound_stage/"
+            if [ "$bound_goos" = windows ]; then
+              (cd "$bound_stage" && zip -q "${GITHUB_WORKSPACE}/dist/${bound_package}.zip" bound.exe README.md INSTALL.md LICENSE)
+            else
+              tar -czf "dist/${bound_package}.tar.gz" -C "$bound_stage" bound README.md INSTALL.md LICENSE
+            fi
+          done
+          git archive --format=tar.gz --prefix="bound-${bound_version}/" \
+            -o "dist/bound-${bound_version}-source.tar.gz" HEAD
+          {
+            printf 'commit=%s\n' "$bound_revision"
+            go version
+            printf 'build=CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=%s"\n' "$bound_version"
+          } > dist/BUILDINFO.txt
+          (cd dist && sha256sum *.tar.gz *.zip BUILDINFO.txt > SHA256SUMS)
+          printf 'BOUND_BUILD_VERSION=%s\n' "$bound_version" >> "$GITHUB_ENV"
+      - name: Smoke test the Linux archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          bound_smoke="${RUNNER_TEMP}/bound-smoke"
+          mkdir -p "$bound_smoke"
+          tar -xzf "dist/bound-${BOUND_BUILD_VERSION}-linux-amd64.tar.gz" -C "$bound_smoke"
+          test "$("${bound_smoke}/bound" version)" = "bound ${BOUND_BUILD_VERSION}"
+          BOUND_DIR="${RUNNER_TEMP}/bound-smoke-logs" "${bound_smoke}/bound" run -- go version
+          set +e
+          BOUND_DIR="${RUNNER_TEMP}/bound-smoke-logs" "${bound_smoke}/bound" log -- sh -c 'printf "synthetic failure\n" >&2; exit 17'
+          bound_status=$?
+          set -e
+          test "$bound_status" -eq 17
+          (cd dist && sha256sum -c SHA256SUMS)
+      - name: Upload binaries, sources and checksums
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bound-${{ env.BOUND_BUILD_VERSION }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Publish download link in run summary
+        env:
+          BOUND_ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        shell: bash
+        run: |
+          printf '[Download bound %s](%s) — Linux, macOS and Windows (amd64/arm64), sources and SHA256SUMS.\n' \
+            "$BOUND_BUILD_VERSION" "$BOUND_ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
