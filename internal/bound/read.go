@@ -17,7 +17,17 @@ func Read(args []string, w io.Writer) int {
 	l := DefaultLimits()
 	flags, pos, _ := parseFlags(args, "outline", "full", "n")
 	if len(pos) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: bound read <file> [A:B] [--outline] [--full] [--grep RE [-C N]]")
+		fmt.Fprintln(os.Stderr, "usage: bound read <file> [A:B] [--outline] [--full] [--grep RE | --query TEXT -k N] [-C N] [--bytes A:B]")
+		return 2
+	}
+	modes := 0
+	for _, mode := range []string{"query", "grep", "bytes"} {
+		if _, ok := flags[mode]; ok {
+			modes++
+		}
+	}
+	if modes > 1 {
+		fmt.Fprintln(w, "bound read: --query, --grep and --bytes are mutually exclusive")
 		return 2
 	}
 	path := pos[0]
@@ -29,6 +39,54 @@ func Read(args []string, w io.Writer) int {
 	e := newEnvelope(l.RunChars * 3) // reads are the one place a bigger budget is legitimate
 	hdr := fmt.Sprintf("[bound read] %s lines=%d bytes=%s (%s)", path, total, Human(size), Tokens(size))
 
+	e.raw(fmt.Sprintf("full: %s\n", path))
+	if query, ok := flags["query"]; ok {
+		if _, other := flags["grep"]; other {
+			fmt.Fprintln(w, "bound read: --query and --grep are mutually exclusive")
+			return 2
+		}
+		k := flagInt(flags, "k", l.QueryDefault, l.QueryHard)
+		e.line(hdr + " query=" + query)
+		err := rankFile(path, query, k, flagInt(flags, "C", 3, 30), e)
+		delivered := e.flush(w)
+		ledgerSource("read", size, delivered, path, path)
+		if err != nil {
+			return 2
+		}
+		return 0
+	}
+	if span, ok := flags["bytes"]; ok {
+		a, b, err := parseRange(span, int(size))
+		if err != nil {
+			fmt.Fprintln(w, "bound read: bad byte range:", err)
+			return 2
+		}
+		e.line(hdr + fmt.Sprintf(" byte_range=%d:%d (1-based inclusive)", a, b))
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintln(w, err)
+			return 1
+		}
+		defer f.Close()
+		_, err = f.Seek(int64(a-1), io.SeekStart)
+		if err != nil {
+			fmt.Fprintln(w, err)
+			return 2
+		}
+		n := min(b-a+1, l.RunChars*3/2)
+		data, err := io.ReadAll(io.LimitReader(f, int64(n)))
+		if err != nil {
+			fmt.Fprintln(w, "incomplete=true:", err)
+			return 2
+		}
+		if n < b-a+1 {
+			e.line("truncated=true; byte range capped to output budget")
+		}
+		e.raw(string(data))
+		delivered := e.flush(w)
+		ledgerSource("read", size, delivered, path, path)
+		return 0
+	}
 	if re, ok := flags["grep"]; ok {
 		ctx := flagInt(flags, "C", 3, 30)
 		rx, err := regexp.Compile("(?i)" + re)
@@ -37,15 +95,22 @@ func Read(args []string, w io.Writer) int {
 			return 2
 		}
 		e.line(hdr + " grep=" + re)
-		n := grepFile(path, rx, ctx, 200, e)
-		if n == 0 {
+		n, readErr := grepFile(path, rx, ctx, 200, e)
+		if readErr != nil {
+			e.linef("incomplete=true read_error=%v", readErr)
+		}
+		if n == 0 && readErr == nil {
 			e.line("no matches")
 		}
 		delivered := e.flush(w)
-		ledger("read", size, delivered, path)
+		ledgerSource("read", size, delivered, path, path)
+		if readErr != nil {
+			return 2
+		}
 		return 0
 	}
 
+	var readErr error
 	var a, b int
 	if len(pos) > 1 {
 		a, b, err = parseRange(pos[1], total)
@@ -61,7 +126,10 @@ func Read(args []string, w io.Writer) int {
 			hdr += fmt.Sprintf(" (range capped to %d lines)", l.ReadHard)
 		}
 		e.line(hdr + fmt.Sprintf(" range=%d:%d", a, b))
-		printRange(path, a, b, e)
+		readErr = printRange(path, a, b, e)
+		if b-a+1 < total {
+			e.line("truncated=true; explicit range covers only part of the source")
+		}
 	case flags["outline"] == "true":
 		e.line(hdr)
 		e.lines(outline(path, 200))
@@ -70,14 +138,20 @@ func Read(args []string, w io.Writer) int {
 			hdr += " FULL READ FORCED"
 		}
 		e.line(hdr)
-		printRange(path, 1, total, e)
+		readErr = printRange(path, 1, total, e)
 	default:
 		e.line(hdr + " > soft limit; showing outline")
 		e.lines(outline(path, 200))
-		e.linef("next: bound read %s A:B  (or --grep RE, or --full to override)", path)
+		e.setNext(ShellQuote([]string{"bound", "read", path, fmt.Sprintf("1:%d", min(total, l.ReadSoft))}))
+	}
+	if readErr != nil {
+		e.linef("incomplete=true read_error=%v", readErr)
 	}
 	delivered := e.flush(w)
-	ledger("read", size, delivered, path)
+	ledgerSource("read", size, delivered, path, path)
+	if readErr != nil {
+		return 2
+	}
 	return 0
 }
 
@@ -114,10 +188,10 @@ func parseRange(s string, total int) (int, int, error) {
 	return start, end, nil
 }
 
-func printRange(path string, a, b int, e *envelope) {
+func printRange(path string, a, b int, e *envelope) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
 	s := scanner(f)
@@ -132,48 +206,74 @@ func printRange(path string, a, b int, e *envelope) {
 		}
 		e.linef("%6d| %s", n, s.Text())
 	}
+	return s.Err()
 }
 
-func grepFile(path string, rx *regexp.Regexp, ctx, maxLines int, e *envelope) int {
+// Search scans the complete source while retaining only bounded context. A
+// bounded view never changes the total hit count or the scan completion flag.
+func grepFile(path string, rx *regexp.Regexp, ctx, maxLines int, e *envelope) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	defer f.Close()
-	var lines []string
+	type row struct {
+		number int
+		text   string
+	}
+	selected := []row{}
+	ring := []row{}
+	hits, n, until, last := 0, 0, 0, 0
+	trimmed := false
+	add := func(r row) {
+		if r.number <= last {
+			return
+		}
+		if len(selected) >= maxLines {
+			trimmed = true
+			return
+		}
+		selected = append(selected, r)
+		last = r.number
+	}
 	s := scanner(f)
 	for s.Scan() {
-		lines = append(lines, s.Text())
-	}
-	show := map[int]bool{}
-	hits := 0
-	for i, ln := range lines {
-		if rx.MatchString(ln) {
+		n++
+		original := s.Text()
+		text := stripANSI(original)
+		if len(text) > 400 {
+			text = text[:400] + " …"
+			trimmed = true
+		}
+		current := row{n, text}
+		if rx.MatchString(original) {
 			hits++
-			for j := i - ctx; j <= i+ctx; j++ {
-				if j >= 0 && j < len(lines) {
-					show[j] = true
-				}
+			for _, r := range ring {
+				add(r)
 			}
+			until = n + ctx
+		}
+		if n <= until {
+			add(current)
+		}
+		ring = append(ring, current)
+		if len(ring) > ctx {
+			ring = ring[1:]
 		}
 	}
-	printed, last := 0, -2
-	for i := range lines {
-		if !show[i] {
-			continue
-		}
-		if printed >= maxLines {
-			e.linef("… %d matching lines total; cap %d reached", hits, maxLines)
-			break
-		}
-		if i != last+1 && last >= 0 {
+	e.linef("matches=%d shown_lines=%d scan_complete=%v truncated=%v", hits, len(selected), s.Err() == nil, trimmed)
+	if trimmed {
+		e.truncated = true
+	}
+	previous := 0
+	for _, r := range selected {
+		if previous > 0 && r.number > previous+1 {
 			e.line("   ---")
 		}
-		e.linef("%6d| %s", i+1, stripANSI(lines[i]))
-		last = i
-		printed++
+		e.linef("%6d| %s", r.number, r.text)
+		previous = r.number
 	}
-	return hits
+	return hits, s.Err()
 }
 
 // outlineRules map file extensions to declaration regexes. ctags is used first
@@ -257,7 +357,9 @@ func outline(path string, max int) []string {
 	if hits > max {
 		out = append(out, fmt.Sprintf("… %d more declarations", hits-max))
 	}
-	if len(out) == 0 {
+	if s.Err() != nil {
+		out = append(out, "incomplete=true read_error="+s.Err().Error())
+	} else if len(out) == 0 {
 		out = []string{"(no declarations recognised; use A:B ranges or --grep)"}
 	}
 	return out

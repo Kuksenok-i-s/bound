@@ -1,11 +1,9 @@
 package bound
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -48,20 +46,22 @@ func Log(args []string, w io.Writer) int {
 	}
 
 	var path, label string
+	exit := 0
+	var captured capture
 	if len(rest) > 0 {
-		spill, err := NewSpill(rest[0])
+		timeout, err := commandTimeout(flags, 5*time.Minute)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "bound log:", err)
+			fmt.Fprintln(w, "bound log: invalid timeout:", err)
 			return 2
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, rest[0], rest[1:]...)
-		cmd.Stdout, cmd.Stderr = spill, spill
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "TERM=dumb", "PAGER=cat", "SYSTEMD_PAGER=cat")
-		_ = cmd.Run()
-		_ = spill.Close()
-		path, label = spill.Name(), ShellQuote(rest)
+		var captureErr error
+		captured, captureErr = captureCommand(rest, timeout, []string{"NO_COLOR=1", "TERM=dumb", "PAGER=cat", "SYSTEMD_PAGER=cat"})
+		if captureErr != nil {
+			fmt.Fprintf(w, "bound log: capture failed: %v full: %s\n", captureErr, captured.Path)
+			return 2
+		}
+		path, label, exit = captured.Path, ShellQuote(rest), captured.Exit
+
 	} else if len(pos) > 0 {
 		path, label = pos[0], pos[0]
 	} else {
@@ -75,63 +75,103 @@ func Log(args []string, w io.Writer) int {
 		return 1
 	}
 	defer f.Close()
-	total, size, _ := countLines(path)
-	var lines []string
+	total, size, countErr := countLines(path)
+	if countErr != nil {
+		fmt.Fprintln(w, "bound log: incomplete=true:", countErr)
+		return 2
+	}
 	var cur time.Time
-	matched := 0
+	matched, selectedTotal, lineNumber, lastSelected, until := 0, 0, 0, 0, 0
+	type row struct {
+		number int
+		text   string
+	}
+	keep := []string{}
+	prior := []row{}
+	shortened := false
+	selectRow := func(r row) {
+		if r.number <= lastSelected {
+			return
+		}
+		selectedTotal++
+		lastSelected = r.number
+		keep = append(keep, r.text)
+		if len(keep) > tail {
+			keep = keep[1:]
+		}
+	}
 	s := scanner(f)
 	for s.Scan() {
-		ln := stripANSI(s.Text())
+		lineNumber++
+		original := stripANSI(s.Text())
 		if !since.IsZero() {
-			if t, ok := lineTime(ln); ok {
+			if t, ok := lineTime(original); ok {
 				cur = t
 			}
 			if cur.Before(since) {
 				continue
 			}
 		}
-		lines = append(lines, ln)
-	}
-	var keep []string
-	if rx != nil {
-		show := map[int]bool{}
-		for i, ln := range lines {
-			if rx.MatchString(ln) {
+		preview := original
+		if len(preview) > 400 {
+			preview = preview[:400] + " …"
+			shortened = true
+		}
+		current := row{lineNumber, preview}
+		if rx == nil {
+			selectRow(current)
+		} else {
+			if rx.MatchString(original) {
 				matched++
-				for j := i - ctxN; j <= i+ctxN; j++ {
-					if j >= 0 && j < len(lines) {
-						show[j] = true
-					}
+				for _, r := range prior {
+					selectRow(r)
 				}
+				until = lineNumber + ctxN
+			}
+			if lineNumber <= until {
+				selectRow(current)
 			}
 		}
-		for i, ln := range lines {
-			if show[i] {
-				keep = append(keep, ln)
-			}
+		prior = append(prior, current)
+		if len(prior) > ctxN {
+			prior = prior[1:]
 		}
-	} else {
-		keep = lines
 	}
-	if len(keep) > tail {
-		keep = keep[len(keep)-tail:]
+	if len(label) > 160 {
+		label = label[:160] + "…"
 	}
 	e := newEnvelope(l.RunChars * 2)
-	hdr := fmt.Sprintf("[bound log] %s lines=%d bytes=%s shown=%d", label, total, Human(size), len(keep))
+	hdr := fmt.Sprintf("[bound log] %s lines=%d bytes=%s shown=%d selected_total=%d scan_complete=%v", label, total, Human(size), len(keep), selectedTotal, s.Err() == nil)
 	if rx != nil {
 		hdr += fmt.Sprintf(" grep=%q matched=%d", flags["grep"], matched)
 	}
 	if !since.IsZero() {
 		hdr += " since=" + since.Format(time.RFC3339)
 	}
-	e.line(hdr)
 	if len(rest) > 0 {
-		e.linef("full: %s", path)
+		hdr += fmt.Sprintf(" exit=%d timed_out=%v", exit, captured.TimedOut)
+		if captured.Error != "" {
+			hdr += " error=" + captured.Error
+		}
+	}
+	e.line(hdr)
+	e.raw(fmt.Sprintf("full: %s\n", path))
+	if s.Err() != nil {
+		e.linef("incomplete=true read_error=%v", s.Err())
+		if exit == 0 {
+			exit = 2
+		}
+	}
+	if shortened || len(keep) < total {
+		e.line("truncated=true; tail/filter is a selected view of the source")
+	}
+	if len(rest) > 0 {
+		e.raw(fmt.Sprintf("status: %s.meta.json\n", path))
 	}
 	e.lines(keep)
 	delivered := e.flush(w)
-	ledger("log", size, delivered, label)
-	return 0
+	ledgerSource("log", size, delivered, label, path)
+	return exit
 }
 
 func parseSince(s string) (time.Time, error) {

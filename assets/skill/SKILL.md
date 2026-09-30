@@ -1,97 +1,80 @@
 ---
 name: bound
-description: Keep coding-task context small through bounded output, targeted exploration, and proportionate verification. Use for repository investigations, noisy commands, or growing sessions; keep clear, small tasks lightweight.
+description: Keep repository investigations and noisy tool output small through targeted exploration, retained evidence, and proportionate verification. Keep clear, small tasks lightweight.
 ---
 
 # bound
 
-Minimize total work for a correct result. Bound large outputs; keep small outputs
-intact. Avoid unnecessary questions, artifacts, delegation, and handoffs.
+Reduce what enters context while retaining the evidence required to finish.
 
-## Scope and explore
+## Scope and evidence
 
-- Infer scope and verification from the request. Ask only about consequential
-  ambiguity, in one message. Clear tasks need no interview. For multi-step work,
-  keep any task card to three lines: deliverable/done-check, constraints, verification.
-  Do not create a separate planning file unless useful or requested.
-- Explore named files → callers/tests/config → package → repo. Skip dependencies,
-  generated files, fixtures, and lockfiles unless relevant.
-- Use available SocratiCode search/symbol/impact tools for navigation; verify source
-  before editing. Follow project indexing/refresh policy. If unavailable, fall back
-  to targeted rg and reads.
-- Extract structured data once; keep it on disk and transform it programmatically
-  instead of printing it into context and reproducing it in generated code.
+- Define the requested result and its readiness checks. Ask only about ambiguity
+  that changes the result or risk. Keep planning internal unless useful to the user.
+- Explore named files, then relevant callers/tests/config and affected packages.
+  Use available navigation tools and verify current source. Skip unrelated generated
+  files, dependencies and lockfiles; inspect them when the question requires them.
+- Read once by default and reuse unchanged evidence. Reread for truncation, source
+  changes, missing evidence after compaction, a new relevant range, or exact text
+  needed for an edit. Do not over-read upfront to satisfy a literal one-read rule.
+- Keep structured intermediate data on disk and transform it programmatically.
+  Apply coherent edit batches with existing generators, formatters or codemods;
+  preserve unrelated work and avoid regenerating unchanged code.
 
-## Evidence and Definition of Done
+## Bounded output
 
-- Establish a lightweight Definition of Done (DoD): required outcome and checks.
-  Before each call, identify the unresolved question or unmet check it addresses.
-  Keep this internal unless explaining a material decision; no per-call narration.
-- Read once by default: batch known files/ranges and reuse unchanged evidence.
-  Retain a compact mental map of file, relevant symbols/lines, and findings; no
-  separate tracking file is required. Reread for changed content, truncated reads,
-  a new question needing another range, or exact source needed for a safe edit.
-  Do not front-load oversized reads to satisfy a literal one-read limit.
-- Combine independent checks and write complete files instead of fragmented edits.
-  Once DoD checks pass, stop unless new evidence reveals a problem.
+- `bound run -- <cmd>` retains merged stdout/stderr and a `.meta.json` termination
+  record, including small output. Check the actual exit status and timeout reason.
+  Retain full per-check diagnostics; use targeted excerpts for context.
+- Use `bound read <file> A:B`, `--grep RE -C 6`, or `--bytes A:B` (1-based inclusive)
+  for exact evidence. Byte ranges recover parts of a long line; small output can be
+  read in full when that is the cheapest complete check.
+- For exploratory lexical retrieval use `bound read <file> --query 'connection refused' -k 10 -C 3`. BM25 ranks words and adjacent word bigrams. Results link to
+  source ranges; top-k, normalised templates and snippets are selected views.
+- Search events required by readiness criteria even when the command exits zero:
+  failures, warnings, skipped checks, low coverage, degradation and completion.
+  Automatic diagnostic categories are heuristic. BM25 scores and rarity do not
+  establish operational importance. No query can prove absence of unrelated events.
+- Before a negative conclusion, check source coverage and `scan_complete` /
+  `incomplete` / `truncated` indicators. A missing excerpt or ranked result is not
+  evidence of absence. Follow the source range or narrow the query as needed.
+- Use `bound grep <pattern> [path]`, `bound diff`, and
+  `bound log <file> --tail 300 --grep RE`. File views reference the original source;
+  execution via `bound log -- <cmd>` retains output and child termination status.
+- Without bound, use targeted reads and host output limits while retaining full
+  diagnostics and status on disk. Avoid dumping large spills into context.
 
-- Noisy commands: `bound run -- <cmd>`. Inspect diagnostic spills with
-  `bound read <spill> --grep RE -C 6` or `A:B`; do not dump entire spills.
-  Summaries guide navigation; verify the underlying evidence and exit status.
-- Search: `bound grep <pattern> [path] [-t ext]`; narrow truncated queries.
-- Read: `bound read <file>`; outline large files, then read targeted ranges.
-  Consider bytes too: a few huge lines can overflow context.
-- Diff/logs: `bound diff`, then targeted files; `bound log --tail 300 --grep RE`.
-- Without bound, use host output limits and targeted reads; preserve exit status
-  and full diagnostics on disk. Batch independent checks when useful.
-- Reuse evidence, but rerun for changed inputs, transient failures, external-state
-  changes, or necessary verification.
+## Verification and completion
 
-## Discover tools once; check affected work together
+- Discover the existing tools needed for this task, once. For code edits identify
+  relevant format/lint/type/build/test commands, supported filters, package scope,
+  versions and dependencies. A small read-only question needs no repository-wide
+  tool inventory. Do not install or replace tools solely for this workflow.
+- Establish relevant staged/unstaged/untracked/deleted changes. Run selected checks
+  after a coherent edit batch: format/fix first, then independent read-only checks
+  together where they do not share mutable outputs. Preserve each exit status.
+- Start with changed files and affected projects/dependents. Widen for shared APIs,
+  dependencies/config/schema, required CI or unresolved risks. Check filenames
+  safely; deleted paths are not existing files. Do not invent single-file support.
+- Reuse green results only while relevant source, configuration, dependency/tool
+  versions, fixtures and environmental assumptions remain valid. Rerun affected
+  checks after a fix or transient/external-state change.
+- Report outcome, verification scope, selected diagnostics and full log paths.
+  Label skipped or unavailable checks. Stop when the requested result and required
+  checks are proved and known risks are resolved or explicitly reported. Compaction
+  and phase boundaries are not completion; do not start watchers unless requested.
 
-- In the first repository discovery batch, identify existing format, lint, type,
-  build, and test commands from manifests, scripts, configs, and CI. Include package
-  manager/tool versions, working directories, supported file filters, and dependencies
-  between checks. Reuse this compact tool map; rediscover only changed configuration
-  or an invalid assumption. Do not install or replace tools just for this workflow.
-- Define the change baseline once. Include relevant staged, unstaged, untracked,
-  renamed, and deleted paths, and changes since the last successful check. Preserve
-  unrelated user edits. Pass filenames safely; do not assume extensions alone reveal
-  impact. Never pass deleted paths as existing files.
-- After a coherent edit batch, invoke the selected checks in one tool call, using an
-  existing repository command or one orchestration script. Format/fix first, then run
-  independent read-only checks together where safe. Avoid duplicate builds and
-  concurrent checks that share mutable outputs. Run all selected checks and retain
-  each exit status; fail the batch if any required check fails.
-- For TypeScript/JavaScript/HTML, filter existing formatters and file-aware linters
-  to changed files. Run type checking/builds at the smallest affected configured
-  package/project scope, and related tests where supported. For C#, filter formatting
-  where supported, but use the owning project and affected dependents for compiler,
-  analyzer, build, and test checks. Do not invent single-file support.
-- Widen for shared API, dependency, config, or schema changes, affected dependents,
-  required CI checks, or unresolved risk. Changed files are a starting set, not proof
-  that the rest of the project is unaffected. Explicitly report skipped/unavailable
-  checks; never label them passed.
-- Save full per-check stdout/stderr to disk. Return status, scope, diagnostic counts
-  when available, a few actionable diagnostics, and log paths. Keep successful output
-  to one line per check. Bound failure excerpts without hiding exit status or claiming
-  omitted diagnostics are absent; inspect relevant logs only as needed.
-- Reuse green results until relevant source/config/tool versions change. After fixes,
-  rerun affected checks, not the whole batch by habit. Finish when DoD passes; do not
-  launch a persistent watcher unless requested.
-- Use scripts/codemods for mechanical transformations, preserving syntax and limiting
-  scope. Reuse repository generators and formatters; inspect the resulting diff and
-  validate behavior. Avoid regenerating unchanged code through model output.
+## Measurement
 
-## Complete and measure
+`bound stats` sums full source bytes per operation: rereading a log counts its
+whole size again, including a one-line range. Printed bytes include envelopes.
+Identified snapshots use path/size/mtime, not content deduplication or a task
+counterfactual. Old entries may lack source identity. Ratios can exceed 100% on
+small output. Stats output and host framing are outside these counters.
 
-Start verification focused; widen for risk, required checks, or unresolved failures.
-Avoid verbose repo-wide output by default. After checks pass, repeat only for a
-relevant change or unresolved concern. Continue through implementation and validation;
-phase boundaries and compaction are not stopping points. Checkpoint when useful;
-hand off when requested or actually unable to continue. Report outcome, checks, limits.
-
-`bound stats` measures bytes, not token or billing savings. For A/B comparisons,
-hold model, task, hooks, other skills, and verification constant; include delegated
-work. Report provider input/output/cache counters when available, label estimates
-and missing telemetry, and assess result quality alongside usage.
+For task comparisons use a separate `BOUND_DIR`, a fixed baseline and equal
+readiness checks; include all follow-up reads and agents. Hold model, task, hooks
+and other skills constant, and assess quality as well as usage. UTF-8 bytes/4 is
+only a labelled estimate, not chars/4 or actual tokens. Use provider input/output/
+cache counters and applicable pricing for token and cost comparisons; disclose
+missing telemetry.

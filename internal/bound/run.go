@@ -1,12 +1,9 @@
 package bound
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -29,49 +26,24 @@ func Run(args []string, w io.Writer) int {
 	if flags["c"] == "true" || (len(argv) == 1 && strings.ContainsAny(argv[0], " |&;<>$`")) {
 		argv = shellArgv(strings.Join(argv, " "))
 	}
-	timeout := 10 * time.Minute
-	if v, ok := flags["timeout"]; ok {
-		if d, err := time.ParseDuration(v); err == nil {
-			timeout = d
-		}
-	}
-	lines := flagInt(flags, "lines", l.RunLines, 400)
-
-	spill, err := NewSpill(argv[0])
+	timeout, err := commandTimeout(flags, 10*time.Minute)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "bound run:", err)
+		fmt.Fprintln(w, "bound run: invalid timeout:", err)
 		return 2
 	}
-	path := spill.Name()
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = spill
-	cmd.Stderr = spill
-	cmd.Env = append(os.Environ(), "NO_COLOR=1", "FORCE_COLOR=0", "TERM=dumb", "CLICOLOR=0", "GIT_PAGER=", "PAGER=")
-	cmd.WaitDelay = 2 * time.Second
-	start := time.Now()
-	runErr := cmd.Run()
-	dur := time.Since(start).Round(100 * time.Millisecond)
-	_ = spill.Close()
-
-	exit := 0
-	switch {
-	case runErr == nil:
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		exit = 124
-	default:
-		var ee *exec.ExitError
-		if errors.As(runErr, &ee) {
-			exit = ee.ExitCode()
-		} else {
-			exit = 127
-		}
+	lines := flagInt(flags, "lines", l.RunLines, 400)
+	captured, err := captureCommand(argv, timeout, []string{"NO_COLOR=1", "FORCE_COLOR=0", "TERM=dumb", "CLICOLOR=0", "GIT_PAGER=", "PAGER="})
+	if err != nil {
+		fmt.Fprintf(w, "bound run: capture failed: %v full: %s\n", err, captured.Path)
+		return 2
 	}
-
-	total, size, _ := countLines(path)
+	path, exit := captured.Path, captured.Exit
+	dur := (time.Duration(captured.DurationMS) * time.Millisecond).Round(100 * time.Millisecond)
+	total, size, scanErr := countLines(path)
+	if scanErr != nil {
+		fmt.Fprintf(w, "bound run: incomplete=true: %v full: %s\n", scanErr, path)
+		return 2
+	}
 	e := newEnvelope(l.RunChars)
 	display := ShellQuote(argv)
 	if len(display) > 160 {
@@ -79,40 +51,47 @@ func Run(args []string, w io.Writer) int {
 	}
 	e.linef("[bound run] %s", display)
 	status := fmt.Sprintf("exit=%d lines=%d bytes=%s (%s) time=%s", exit, total, Human(size), Tokens(size), dur)
-	if exit == 124 {
+	if captured.TimedOut {
 		status += " TIMEOUT"
 	}
-	if exit == 127 && runErr != nil {
-		status += " error=" + runErr.Error()
+	if captured.Error != "" {
+		status += " error=" + captured.Error
 	}
 	e.line(status)
+	e.raw(fmt.Sprintf("full: %s\n", path))
+	e.raw(fmt.Sprintf("status: %s.meta.json\n", path))
 
 	// Green run of a recognised test runner: the per-package/per-test "ok" list
 	// is the least useful output there is. Keep the summary, keep the spill.
 	if exit == 0 && total > 8 {
 		if kind, summary := summarize(argv, path); kind != "generic" && len(summary) > 0 {
-			e.linef("full: %s", path)
 			e.section("summary (" + kind + ")")
 			e.lines(summary)
-			e.linef("next: bound read %s   (passing output; usually not needed)", path)
+			e.lines(eventSummaryFile(path))
+			e.setNext(ShellQuote([]string{"bound", "read", path, "--grep", diagnosticPattern, "-C", "6"}))
 			delivered := e.flush(w)
-			ledger("run", size, delivered, argv[0])
+			ledgerSource("run", size, delivered, argv[0], path)
 			return exit
 		}
 	}
 
-	// Small output: show verbatim, nothing hidden.
+	// Small output is delivered verbatim, but always retain the source and status.
 	if total <= lines && size <= int64(l.RunChars)*2/3 {
-		head, _, _ := headTail(path, total, 0)
-		e.lines(head)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintln(w, "bound run: incomplete=true:", err)
+			return 2
+		}
+		e.raw(string(data))
 		delivered := e.flush(w)
-		ledger("run", size, delivered, argv[0])
-		_ = os.Remove(path)
+		ledgerSource("run", size, delivered, argv[0], path)
 		return exit
 	}
 
-	e.linef("full: %s", path)
 	kind, summary := summarize(argv, path)
+	if kind != "generic" {
+		summary = append(summary, eventSummaryFile(path)...)
+	}
 	if len(summary) > 0 {
 		e.section("summary (" + kind + ")")
 		e.lines(summary)
@@ -122,29 +101,32 @@ func Run(args []string, w io.Writer) int {
 		// A recognised parser found the signal; excerpts are only for orientation.
 		h, t = lines/6, lines/3
 	}
-	head, tail, _ := headTail(path, h, t)
+	head, tail, _, readErr := headTail(path, h, t)
+	if readErr != nil {
+		e.linef("incomplete=true read_error=%v", readErr)
+	}
 	e.section(fmt.Sprintf("head (%d)", len(head)))
 	e.lines(head)
 	e.section(fmt.Sprintf("tail (%d)", len(tail)))
 	e.lines(tail)
-	e.linef("next: bound read %s --grep '%s' -C 6   | bound read %s A:B", path, nextPattern(kind), path)
+	e.setNext(ShellQuote([]string{"bound", "read", path, "--grep", nextPattern(kind), "-C", "6"}))
 	delivered := e.flush(w)
-	ledger("run", size, delivered, argv[0])
+	ledgerSource("run", size, delivered, argv[0], path)
 	return exit
 }
 
 func nextPattern(kind string) string {
 	switch kind {
 	case "go test":
-		return "--- FAIL|panic:|FAIL\\s"
+		return "--- FAIL|panic:|FAIL\\s|" + diagnosticPattern
 	case "pytest":
-		return "^FAILED|^ERROR|^E "
+		return "^FAILED|^ERROR|^E |" + diagnosticPattern
 	case "jest":
-		return "●|✕|FAIL "
+		return "●|✕|FAIL |" + diagnosticPattern
 	case "cargo":
-		return "FAILED|panicked|^error"
+		return "FAILED|panicked|^error|" + diagnosticPattern
 	}
-	return "error|fail|panic|exception|fatal"
+	return diagnosticPattern
 }
 
 // summarize picks a parser from argv and returns (kind, lines).
@@ -210,7 +192,6 @@ var (
 	cargoResRE  = regexp.MustCompile(`^test result: (.*)`)
 	cargoFailRE = regexp.MustCompile(`^test (\S+) \.\.\. FAILED`)
 	cargoErrRE  = regexp.MustCompile(`^(error(\[E\d+\])?: .*|.*panicked at .*)`)
-	genericRE   = regexp.MustCompile(`(?i)\b(error|fail(ed|ure)?|panic|exception|fatal|traceback|denied|timeout)\b`)
 )
 
 func parseGo(r io.Reader) []string {
@@ -220,9 +201,6 @@ func parseGo(r io.Reader) []string {
 	pending := "" // location seen after "=== RUN" but before "--- FAIL" (-v mode)
 	loc := func(m []string) string {
 		msg := m[2]
-		if len(msg) > 120 {
-			msg = msg[:120] + "…"
-		}
 		return "  @" + m[1] + ": " + msg
 	}
 	s := scanner(r)
@@ -278,6 +256,9 @@ func parseGo(r io.Reader) []string {
 	if len(pkgs) > 0 && len(fails) == 0 {
 		out = append(out, capLines(pkgs, 10)...)
 	}
+	if s.Err() != nil {
+		out = append(out, "incomplete=true read_error="+s.Err().Error())
+	}
 	return out
 }
 
@@ -311,6 +292,9 @@ func parsePytest(r io.Reader) []string {
 	if len(fails) > 0 {
 		out = append(out, es...)
 	}
+	if s.Err() != nil {
+		out = append(out, "incomplete=true read_error="+s.Err().Error())
+	}
 	return out
 }
 
@@ -332,7 +316,11 @@ func parseJest(r io.Reader) []string {
 			}
 		}
 	}
-	return append(summ, fails...)
+	out := append(summ, fails...)
+	if s.Err() != nil {
+		out = append(out, "incomplete=true read_error="+s.Err().Error())
+	}
+	return out
 }
 
 func parseCargo(r io.Reader) []string {
@@ -353,28 +341,14 @@ func parseCargo(r io.Reader) []string {
 		}
 	}
 	out := append(res, capLines(fails, 25)...)
-	return append(out, errs...)
+	out = append(out, errs...)
+	if s.Err() != nil {
+		out = append(out, "incomplete=true read_error="+s.Err().Error())
+	}
+	return out
 }
 
-func parseGeneric(r io.Reader) []string {
-	var hits []string
-	n := 0
-	s := scanner(r)
-	for s.Scan() {
-		line := stripANSI(s.Text())
-		if genericRE.MatchString(line) {
-			n++
-			if len(hits) < 20 {
-				hits = append(hits, strings.TrimSpace(line))
-			}
-		}
-	}
-	if n == 0 {
-		return nil
-	}
-	out := []string{fmt.Sprintf("lines matching error|fail|panic|exception|fatal: %d (showing %d)", n, len(hits))}
-	return append(out, hits...)
-}
+func parseGeneric(r io.Reader) []string { return eventSummary(r) }
 
 func capLines(ls []string, n int) []string {
 	if len(ls) <= n {

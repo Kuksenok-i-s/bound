@@ -4,9 +4,10 @@ Bounded tool output for coding agents. One static Go binary, no dependencies.
 Linux, macOS, Windows.
 
 `bound` sits between an agent (Cursor, Claude Code, Codex, cloud agents, anything with a
-shell) and the commands it runs. Every subcommand returns a fixed-size envelope and writes
-the full artifact to disk, so a test run, a search, a diff or a log can never dump
-hundreds of kilotokens into the model's context. A pre-tool hook rewrites heavy shell
+shell) and the commands it runs. Command execution retains full merged stdout/stderr
+and a separate termination record; file views link to the original source. Bounded
+envelopes select evidence without deleting its source. Omitted text and incomplete
+scans are explicit. A pre-tool hook rewrites heavy shell
 commands transparently. Two skills teach the agent the protocol: `bound` (targeted exploration, bounded output,
 proportionate verification) and `proto` (token-frugal HTML prototyping).
 
@@ -51,9 +52,9 @@ verification held constant; assess result quality as well.
 ```text
 bound run    [--timeout 10m] [--lines 60] [-c] -- <cmd...>
 bound grep   [-n 100] [-i] [-w] [-F] [-t ext] [-g glob] <pattern> [paths]
-bound read   <file> [A:B] [--outline] [--full] [--grep RE -C 3]
+bound read   <file> [A:B] [--outline] [--full] [--grep RE | --query TEXT -k 10] [-C 3] [--bytes A:B]
 bound diff   [git-diff args] [-- paths]
-bound log    <file> | -- <cmd...>  [--tail 200] [--grep RE] [--since 30m|TS] [-C 0]
+bound log    <file> | -- <cmd...>  [--tail 200] [--grep RE] [--since 30m|TS] [-C 0] [--timeout 5m]
 bound tree   [dir] [--depth 3] [--max 500]
 bound hook   <cursor|claude|codex>          # stdin JSON → stdout JSON
 bound init   [--agent all|cursor|claude|codex] [--project] [--no-skills] [--agents-md] [--dry-run]
@@ -65,7 +66,7 @@ Example envelope:
 
 ```text
 [bound run] go test ./...
-exit=1 lines=811 bytes=18.0K (~4601tok) time=400ms
+exit=1 lines=811 bytes=18.0K (~4601tok; UTF-8 bytes/4 estimate) time=400ms
 full: /tmp/bound/20260921-232116-go-390972712.log
 --- summary (go test)
 packages ok=0 fail=1  tests failed=2
@@ -79,7 +80,33 @@ next: bound read /tmp/bound/...log --grep '--- FAIL|panic:|FAIL\s' -C 6
 ```
 
 Parsers: `go test`, `go build/vet`, `pytest`, `jest`/`vitest`/`npm test`, `cargo`,
-generic (error/fail/panic lines). Small outputs are printed verbatim, nothing hidden.
+generic diagnostic events (errors, warnings, degradation, skipped checks, coverage).
+Repeated diagnostic templates show counts, first/last line numbers and original
+examples. Timestamps, UUIDs and labelled request/trace IDs are normalised only for grouping;
+status codes, versions and other numeric evidence remain distinct. Categories are
+heuristic; task-specific completion and coverage checks remain necessary. Small
+command output is printed verbatim within the envelope budget and always retained.
+
+`bound run` and execution through `bound log -- <cmd>` retain `<spill>.meta.json`
+with exit, timeout reason and duration. A normal exit 124 is distinct from a timeout.
+`bound read --bytes 401:800` retrieves a portion of a long line (1-based inclusive).
+Regex search scans the full file while retaining bounded context; long lines do
+not end the scan at 16 MiB. Reading still needs memory proportional to the longest
+individual line. Source views may omit text even when `scan_complete=true`.
+
+For exploratory retrieval:
+
+```sh
+bound read build.log --query 'connection refused' -k 10 -C 3
+```
+
+This uses two streaming BM25 passes over lines with words and adjacent word
+bigrams (k1=1.2, b=0.75, bigram weight 1.5). Top-k results have source range commands
+for context, including neighbouring stacktrace lines. Query/source tokenisation
+is identical; identifiers split at underscores, while code/number tokens remain.
+Ranking does not establish event severity or prove readiness. A missing ranked
+result is not evidence of absence. Detected size/mtime, pathname identity or line-count changes during ranking report
+an incomplete result; retry against a stable file.
 Outlines (`bound read` on big files): ~20 languages via regex, `ctags` when installed,
 plus HTML/Pug structure (headings, landmarks, forms, templates, ids).
 
@@ -95,6 +122,8 @@ Soft defaults, hard caps; override soft values with `BOUND_*` env vars.
 | diff | 800 lines | 5000 | `BOUND_DIFF_SOFT` |
 | log | tail 200 | 1000 | `BOUND_LOG_TAIL` |
 | tree | depth 3, 500 entries | 2000 | `BOUND_TREE_MAX` |
+| BM25 results | 10 | 50 | `BOUND_QUERY_MAX` |
+| event templates | 40 | 200 | `BOUND_EVENT_MAX` |
 | spill dir | `$TMPDIR/bound` | | `BOUND_DIR` |
 
 ## What the hook does
@@ -154,9 +183,21 @@ shell written once, search-replace edits only, never read a page back.
 
 ## Measuring
 
-`bound stats` shows raw vs delivered bytes per kind (chars/4 estimate). It is **not** your
-bill. Compare paired sessions with and without `bound` in the host's usage panel; the
-counterfactual that matters is billed input, not compressed bytes.
+`bound stats` reports source and printed **bytes per operation**, not task savings.
+Reading one line of an 80,000-byte log still adds 80,000 source bytes; ten rereads
+add 800,000. Printed bytes include the envelope and can exceed source bytes on a
+small command. They exclude this stats output and host framing/transport effects.
+
+Identified source snapshots deduplicate path/size/mtime identities across operations;
+they are not content deduplication, unique underlying bytes or a task baseline.
+Old ledger entries can lack identity and are reported as unattributed. Invalid
+records and incomplete ledger reads are disclosed rather than treated as complete.
+
+Use a separate `BOUND_DIR` for each task comparison, a fixed baseline and equal
+readiness criteria. Count follow-up reads and all agents. UTF-8 bytes/4 is a labelled
+heuristic, not chars/4, a tokenizer result or billed usage. Compare provider input,
+output and cache counters, quality and applicable rates before claiming token/cost
+savings. No provider telemetry is collected by this CLI.
 
 ## Non-goals
 

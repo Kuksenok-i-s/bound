@@ -19,9 +19,9 @@ usage: bound <command> [flags] [args]
 
   run   [--timeout D] [--lines N] [-c] -- <cmd...>   run a command; envelope + spill file
   grep  [-n N] [-i] [-t ext] [-g glob] <pattern> [paths]   bounded search (rg/grep)
-  read  <file> [A:B] [--outline] [--full] [--grep RE -C N]   bounded file read
+  read  <file> [A:B] [--outline] [--full] [--grep RE | --query TEXT -k N] [-C N] [--bytes A:B]
   diff  [git-diff args] [-- paths]                     --stat first, per-file on request
-  log   <file> | -- <cmd...>  [--tail N] [--grep RE] [--since TS] [-C N]
+  log   <file> | -- <cmd...>  [--tail N] [--grep RE] [--since TS] [-C N] [--timeout D]
   tree  [dir] [--depth N] [--max N]                    bounded directory listing
   hook  <cursor|claude|codex>                          pre-tool hook adapter (stdin JSON)
   init  [--agent all|cursor|claude|codex] [--project] [--no-skills] [--agents-md] [--dry-run]
@@ -30,7 +30,8 @@ usage: bound <command> [flags] [args]
   version
 
 env: BOUND_DIR (spill dir, default $TMPDIR/bound), BOUND_RUN_LINES, BOUND_GREP_MAX,
-     BOUND_READ_SOFT, BOUND_READ_HARD, BOUND_DIFF_SOFT, BOUND_LOG_TAIL, BOUND_TREE_MAX
+     BOUND_READ_SOFT, BOUND_READ_HARD, BOUND_DIFF_SOFT, BOUND_LOG_TAIL, BOUND_TREE_MAX,
+     BOUND_QUERY_MAX, BOUND_EVENT_MAX
 `
 
 func main() {

@@ -12,8 +12,8 @@ import (
 )
 
 // Stats reports raw vs delivered bytes per command kind from the ledger and
-// lists spill files. Numbers are chars/4 estimates of what the agent would
-// have received, not billed tokens: compare with your host's usage panel.
+// lists spill files. Source bytes are summed per operation, including rereads.
+// Printed bytes include envelopes, but not host framing or provider billing.
 func Stats(args []string, w io.Writer) int {
 	flags, _, _ := parseFlags(args, "clean")
 	dir := SpillDir()
@@ -33,11 +33,19 @@ func Stats(args []string, w io.Writer) int {
 	}
 	byKind := map[string]*agg{}
 	total := agg{}
+	snapshots := map[string]int64{}
+	unattributed, invalid := 0, 0
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		var e ledgerEntry
-		if json.Unmarshal(s.Bytes(), &e) != nil {
+		if json.Unmarshal(s.Bytes(), &e) != nil || e.Kind == "" || e.Raw < 0 || e.Delivered < 0 {
+			invalid++
 			continue
+		}
+		if e.Snapshot != "" {
+			snapshots[e.Snapshot] = e.Raw
+		} else {
+			unattributed++
 		}
 		a := byKind[e.Kind]
 		if a == nil {
@@ -57,13 +65,26 @@ func Stats(args []string, w io.Writer) int {
 	}
 	sort.Strings(kinds)
 	fmt.Fprintf(w, "[bound stats] %s\n", dir)
-	fmt.Fprintf(w, "%-6s %6s %10s %10s %6s\n", "kind", "calls", "raw", "delivered", "kept")
+	fmt.Fprintf(w, "%-6s %6s %10s %10s %6s\n", "kind", "calls", "source", "printed", "ratio")
 	for _, k := range kinds {
 		a := byKind[k]
 		fmt.Fprintf(w, "%-6s %6d %10s %10s %5.0f%%\n", k, a.n, Human(a.raw), Human(a.delivered), pct(a.delivered, a.raw))
 	}
-	fmt.Fprintf(w, "%-6s %6d %10s %10s %5.0f%%   (%s raw -> %s delivered, chars/4 estimate)\n",
+	fmt.Fprintf(w, "%-6s %6d %10s %10s %5.0f%%   (%s raw -> %s delivered, UTF-8 bytes/4 estimate; operations only)\n",
 		"total", total.n, Human(total.raw), Human(total.delivered), pct(total.delivered, total.raw), Tokens(total.raw), Tokens(total.delivered))
+	sourceBytes := int64(0)
+	for _, size := range snapshots {
+		sourceBytes += size
+	}
+	fmt.Fprintf(w, "identified source snapshots=%d source_bytes=%d unattributed_calls=%d invalid_records=%d\n", len(snapshots), sourceBytes, unattributed, invalid)
+	fmt.Fprintln(w, "Source totals count the full source again on each read; ratios are not task savings. Snapshots use path/size/mtime identity, not content deduplication. Printed bytes exclude this stats output and host framing; use provider input/output/cache counters for task A/B and cost.")
+	if invalid > 0 {
+		fmt.Fprintln(w, "incomplete=true; invalid ledger entries excluded from totals")
+	}
+	if s.Err() != nil {
+		fmt.Fprintf(w, "incomplete=true ledger_read_error=%v\n", s.Err())
+		return 2
+	}
 	entries, _ := os.ReadDir(dir)
 	var files []os.DirEntry
 	for _, e := range entries {
@@ -73,6 +94,9 @@ func Stats(args []string, w io.Writer) int {
 	}
 	if len(files) > 0 {
 		fmt.Fprintf(w, "artifacts: %d (bound stats --clean removes >7d)\n", len(files))
+	}
+	if invalid > 0 {
+		return 2
 	}
 	return 0
 }
