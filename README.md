@@ -13,16 +13,21 @@ proportionate verification) and `proto` (token-frugal HTML prototyping).
 
 ## Quick start
 
+For prebuilt packages (no Go required), follow **[INSTALL.md](INSTALL.md)**.
+To build current `main` from source:
+
 ```sh
-go install github.com/Kuksenok-i-s/bound@latest   # Go 1.22+
-bound init --agent all                              # hooks + skills for Cursor, Claude Code, Codex
-bound doctor                                        # verify
+go install github.com/Kuksenok-i-s/bound@main   # Go 1.22+
+bound init --agent codex                      # choose your host
+bound doctor
 ```
 
-Per repository (cloud agents load project hooks, not user hooks):
+`init` bundles the `bound` and `proto` skills. See INSTALL.md for a bound-only
+installation, updates at an existing hook path, or another host.
+Per repository, when project integration is intended:
 
 ```sh
-bound init --project --agents-md
+bound init --agent codex --project --agents-md
 ```
 
 Full walkthrough for humans and a copy-paste block for agents: **[INSTALL.md](INSTALL.md)**.
@@ -38,7 +43,7 @@ Artifacts are retained for 90 days; the workflow can also be run manually.
 Give this to an agent to have it install itself:
 
 ```text
-Install and configure bound following https://raw.githubusercontent.com/Kuksenok-i-s/bound/main/INSTALL.md Part B.
+Install or update bound following https://raw.githubusercontent.com/Kuksenok-i-s/bound/main/INSTALL.md Part B. Configure the current host, user-level, with the bound skill only.
 ```
 
 ## Why
