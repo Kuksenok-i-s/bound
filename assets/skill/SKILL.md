@@ -41,6 +41,15 @@ Reduce what enters context while retaining the evidence required to finish.
 - Use `bound grep <pattern> [path]`, `bound diff`, and
   `bound log <file> --tail 300 --grep RE`. File views reference the original source;
   execution via `bound log -- <cmd>` retains output and child termination status.
+- For a long log, profile before reading: `bound log <file> --grep RE --profile`.
+  The `--- profile` section describes *when* matching lines arrived (rate per bin,
+  lines collapsed into events, inter-arrival spread, a Hawkes fit) and ends with a
+  heuristic `verdict:`. Treat it as a map, not a finding: it says where and in what
+  shape the events are, never why. Periodic → a timer or retry loop, read one cycle.
+  Duplicates → raise `--gap`. Non-stationary → read the bins, ignore the fit.
+  Cascade → read the first events of a burst, the rest are consequences.
+  Poisson-like → a per-bin threshold is enough. Verify the parameters printed on the
+  `hawkes` line before quoting the verdict, and narrow with `--since`/`--grep`.
 - Without bound, use targeted reads and host output limits while retaining full
   diagnostics and status on disk. Avoid dumping large spills into context.
 

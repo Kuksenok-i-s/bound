@@ -34,6 +34,8 @@ type Limits struct {
 	QueryDefault int
 	QueryHard    int
 	EventMax     int
+	ProfileBins  int // histogram bins printed by `bound log --profile`
+	ProfileFit   int // most recent logical events used for the Hawkes fit
 }
 
 // DefaultLimits returns the built-in budgets, overridable via BOUND_* env vars.
@@ -46,7 +48,8 @@ func DefaultLimits() Limits {
 		LogTail: 200, LogHard: 1000,
 		TreeDepth: 3, TreeMax: 500,
 		QueryDefault: 10, QueryHard: 50,
-		EventMax: 40,
+		EventMax:    40,
+		ProfileBins: 24, ProfileFit: 50000,
 	}
 	envInt("BOUND_RUN_LINES", &l.RunLines)
 	envInt("BOUND_RUN_CHARS", &l.RunChars)
@@ -65,6 +68,10 @@ func DefaultLimits() Limits {
 	if l.EventMax > 200 {
 		l.EventMax = 200
 	}
+	envInt("BOUND_PROFILE_BINS", &l.ProfileBins)
+	l.ProfileBins = min(60, l.ProfileBins)
+	envInt("BOUND_PROFILE_FIT", &l.ProfileFit)
+	l.ProfileFit = min(200000, l.ProfileFit)
 	return l
 }
 

@@ -68,6 +68,7 @@ bound grep   [-n 100] [-i] [-w] [-F] [-t ext] [-g glob] <pattern> [paths]
 bound read   <file> [A:B] [--outline] [--full] [--grep RE | --query TEXT -k 10] [-C 3] [--bytes A:B]
 bound diff   [git-diff args] [-- paths]
 bound log    <file> | -- <cmd...>  [--tail 200] [--grep RE] [--since 30m|TS] [-C 0] [--timeout 5m]
+             [--profile [--bin 1m] [--gap 100ms]]
 bound tree   [dir] [--depth 3] [--max 500]
 bound hook   <cursor|claude|codex>          # stdin JSON → stdout JSON
 bound init   [--agent all|cursor|claude|codex] [--project] [--no-skills] [--agents-md] [--dry-run]
@@ -102,6 +103,16 @@ command output is printed verbatim within the envelope budget and always retaine
 
 `bound run` and execution through `bound log -- <cmd>` retain `<spill>.meta.json`
 with exit, timeout reason and duration. A normal exit 124 is distinct from a timeout.
+`bound log --profile` replaces the tail with a bounded summary of *when* the selected
+lines arrived, for a day of logs without reading it: counts per bin (auto width or
+`--bin`), lines collapsed into logical events (`--gap`, default 100ms, because one
+event usually writes several lines), inter-arrival percentiles, bin dispersion
+(Fano factor) and an exponential-kernel Hawkes fit. The verdict line distinguishes a
+periodic timer or retry loop, multi-line duplicates, an externally driven
+non-stationary rate, a self-exciting cascade (branching ratio = share of events
+triggered by a prior one, decay = how long one event raises the risk), and a
+Poisson-like source where a per-bin threshold suffices. Thresholds are heuristic and
+the fitted parameters are printed alongside, so the verdict can be checked.
 `bound read --bytes 401:800` retrieves a portion of a long line (1-based inclusive).
 Regex search scans the full file while retaining bounded context; long lines do
 not end the scan at 16 MiB. Reading still needs memory proportional to the longest
@@ -137,6 +148,7 @@ Soft defaults, hard caps; override soft values with `BOUND_*` env vars.
 | tree | depth 3, 500 entries | 2000 | `BOUND_TREE_MAX` |
 | BM25 results | 10 | 50 | `BOUND_QUERY_MAX` |
 | event templates | 40 | 200 | `BOUND_EVENT_MAX` |
+| log profile | 24 bins, fit on last 50k events | 60, 200k | `BOUND_PROFILE_BINS`, `BOUND_PROFILE_FIT` |
 | spill dir | `$TMPDIR/bound` | | `BOUND_DIR` |
 
 ## What the hook does

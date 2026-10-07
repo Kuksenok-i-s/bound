@@ -22,11 +22,26 @@ var tsLayouts = []struct {
 
 // Log prints the tail of a log file or command, optionally filtered by regex
 // and start time. Unbounded log dumps are impossible by construction.
+// --profile replaces the tail with a bounded arrival-process summary of the
+// selected lines (rate per bin, duplicates, inter-arrival, Hawkes fit).
 func Log(args []string, w io.Writer) int {
 	l := DefaultLimits()
-	flags, pos, rest := parseFlags(args)
-	tail := flagInt(flags, "tail", l.LogTail, l.LogHard)
+	flags, pos, rest := parseFlags(args, "profile")
+	profile := flags["profile"] == "true"
+	defaultTail := l.LogTail
+	if profile {
+		defaultTail = 0
+	}
+	tail := flagInt(flags, "tail", defaultTail, l.LogHard)
 	ctxN := flagInt(flags, "C", 0, 20)
+	bin, binErr := parseDurationFlag(flags, "bin", 0)
+	gap, gapErr := parseDurationFlag(flags, "gap", 100*time.Millisecond)
+	for _, err := range []error{binErr, gapErr} {
+		if err != nil {
+			fmt.Fprintf(w, "[bound log] %v\n", err)
+			return 2
+		}
+	}
 	var rx *regexp.Regexp
 	if g, ok := flags["grep"]; ok {
 		var err error
@@ -100,13 +115,19 @@ func Log(args []string, w io.Writer) int {
 			keep = keep[1:]
 		}
 	}
+	var prof logProfile
 	s := scanner(f)
 	for s.Scan() {
 		lineNumber++
 		original := stripANSI(s.Text())
+		var lt time.Time
+		timed := false
+		if !since.IsZero() || profile {
+			lt, timed = lineTime(original)
+		}
 		if !since.IsZero() {
-			if t, ok := lineTime(original); ok {
-				cur = t
+			if timed {
+				cur = lt
 			}
 			if cur.Before(since) {
 				continue
@@ -120,9 +141,15 @@ func Log(args []string, w io.Writer) int {
 		current := row{lineNumber, preview}
 		if rx == nil {
 			selectRow(current)
+			if profile {
+				prof.add(lt, timed)
+			}
 		} else {
 			if rx.MatchString(original) {
 				matched++
+				if profile {
+					prof.add(lt, timed)
+				}
 				for _, r := range prior {
 					selectRow(r)
 				}
@@ -167,6 +194,9 @@ func Log(args []string, w io.Writer) int {
 	}
 	if len(rest) > 0 {
 		e.raw(fmt.Sprintf("status: %s.meta.json\n", path))
+	}
+	if profile {
+		prof.render(e, l, bin, gap)
 	}
 	e.lines(keep)
 	delivered := e.flush(w)
