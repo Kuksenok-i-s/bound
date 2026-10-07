@@ -52,6 +52,17 @@ var (
 		"docker":         {"--tail", "--since", "-n"},
 		"docker-compose": {"--tail", "--since"},
 	}
+	// log readers whose lines carry no timestamp unless asked; the source's own
+	// clock is the only correct one for --since and --profile (journalctl already
+	// prints syslog timestamps by default)
+	stampFlags = map[string]struct {
+		have []string
+		add  string
+	}{
+		"kubectl":        {[]string{"--timestamps", "--timestamps=true", "--timestamps=false"}, "--timestamps"},
+		"docker":         {[]string{"-t", "--timestamps"}, "-t"},
+		"docker-compose": {[]string{"-t", "--timestamps"}, "-t"},
+	}
 )
 
 // RewriteShell decides what to do with a shell command the agent is about to run.
@@ -74,14 +85,22 @@ func RewriteShell(cmd string, cwd string, l Limits) Decision {
 
 	// Unbounded log readers: add a tail instead of refusing.
 	if flags, ok := tailFlags[name]; ok && isLogRead(name, base) {
+		var added []string
 		if !hasAny(base, flags) {
 			add := "-n 300"
 			if name != "journalctl" {
 				add = "--tail=300"
 			}
 			argv = append(argv, strings.Fields(add)...)
+			added = append(added, add)
+		}
+		if st, ok := stampFlags[name]; ok && !hasAny(base, st.have) {
+			argv = append(argv, st.add)
+			added = append(added, st.add+" (source timestamps for --since/--profile)")
+		}
+		if len(added) > 0 {
 			return Decision{Action: "rewrite", Command: self + " run -- " + ShellQuote(argv),
-				Reason: "log read without a bound; added " + add + " and wrapped in bound run"}
+				Reason: "log read; added " + strings.Join(added, ", ") + " and wrapped in bound run"}
 		}
 		return Decision{Action: "rewrite", Command: self + " run -- " + ShellQuote(argv), Reason: "wrapped in bound run"}
 	}

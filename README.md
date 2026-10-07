@@ -63,12 +63,12 @@ verification held constant; assess result quality as well.
 ## Commands
 
 ```text
-bound run    [--timeout 10m] [--lines 60] [-c] -- <cmd...>
+bound run    [--timeout 10m] [--lines 60] [-c] [--stamp] -- <cmd...>
 bound grep   [-n 100] [-i] [-w] [-F] [-t ext] [-g glob] <pattern> [paths]
 bound read   <file> [A:B] [--outline] [--full] [--grep RE | --query TEXT -k 10] [-C 3] [--bytes A:B]
 bound diff   [git-diff args] [-- paths]
 bound log    <file> | -- <cmd...>  [--tail 200] [--grep RE] [--since 30m|TS] [-C 0] [--timeout 5m]
-             [--profile [--bin 1m] [--gap 100ms]]
+             [--profile [--bin 1m] [--gap 100ms]] [--stamp]
 bound tree   [dir] [--depth 3] [--max 500]
 bound hook   <cursor|claude|codex>          # stdin JSON → stdout JSON
 bound init   [--agent all|cursor|claude|codex] [--project] [--no-skills] [--agents-md] [--dry-run]
@@ -113,6 +113,14 @@ non-stationary rate, a self-exciting cascade (branching ratio = share of events
 triggered by a prior one, decay = how long one event raises the risk), and a
 Poisson-like source where a per-bin threshold suffices. Thresholds are heuristic and
 the fitted parameters are printed alongside, so the verdict can be checked.
+
+Captured commands (`bound run`, `bound log -- <cmd>`) report `timestamps=N/M`: how many
+lines began with a recognised timestamp. With none, a hint names the fix: the tool's own
+timestamp flag (`docker logs -t`, `kubectl logs --timestamps`; the hook adds these), or
+`--stamp`, which prefixes an RFC3339Nano *receive* time to lines that lack one, leaving
+the rest verbatim and recording `stamped_lines` in `.meta.json`. Receive times suit live
+streams (test runs, builds, `-f`); block-buffered stdout arrives in bursts and a
+replayed log arrives all at once, so prefer source timestamps where they exist.
 `bound read --bytes 401:800` retrieves a portion of a long line (1-based inclusive).
 Regex search scans the full file while retaining bounded context; long lines do
 not end the scan at 16 MiB. Reading still needs memory proportional to the longest
@@ -159,7 +167,9 @@ broke commands and caused retry turns.
 
 - `go test`, `pytest`, `npm test`, `cargo test`, `make`, `docker build`, `rg`, `find`, … → `bound run --`
 - `go test -v ./...` → `-v` dropped (repo-wide verbose adds nothing; failures still shown)
-- `kubectl logs`, `docker logs`, `journalctl` without a bound → `--tail=300` / `-n 300` added
+- `kubectl logs`, `docker logs`, `journalctl` without a bound → `--tail=300` / `-n 300` added;
+  `kubectl logs` / `docker logs` without timestamps → `--timestamps` / `-t` added, so the
+  source's own clock drives `bound log --since` and `--profile`
 - `git diff` → `bound diff`; `git log` without a count → `-n 20`; `git status` → `--short --branch`
 - `cat <file>` → `bound read <file>`; bare `find .` → `bound tree .`
 - host `Grep` tool without `head_limit` → `head_limit=100` (Cursor, Claude Code)

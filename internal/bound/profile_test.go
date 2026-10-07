@@ -85,6 +85,13 @@ func TestProfileRecoversHawkesBranchingRatio(t *testing.T) {
 	}
 }
 
+func TestProfileToleratesOutOfOrderTimestamps(t *testing.T) {
+	out := profileOf(t, []float64{100, 101, 102, -500, 103, 104})
+	if !strings.Contains(out, "events=6") || strings.Contains(out, "panic") {
+		t.Fatal(out)
+	}
+}
+
 func TestProfileWithoutTimestampsSaysSo(t *testing.T) {
 	var p logProfile
 	p.add(time.Time{}, false)

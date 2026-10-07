@@ -14,7 +14,7 @@ import (
 // build errors), head/tail excerpts and the exact next command to dig deeper.
 func Run(args []string, w io.Writer) int {
 	l := DefaultLimits()
-	flags, pos, rest := parseFlags(args, "c", "quiet")
+	flags, pos, rest := parseFlags(args, "c", "quiet", "stamp")
 	argv := rest
 	if len(argv) == 0 {
 		argv = pos
@@ -32,7 +32,7 @@ func Run(args []string, w io.Writer) int {
 		return 2
 	}
 	lines := flagInt(flags, "lines", l.RunLines, 400)
-	captured, err := captureCommand(argv, timeout, []string{"NO_COLOR=1", "FORCE_COLOR=0", "TERM=dumb", "CLICOLOR=0", "GIT_PAGER=", "PAGER="})
+	captured, err := captureCommandStamped(argv, timeout, []string{"NO_COLOR=1", "FORCE_COLOR=0", "TERM=dumb", "CLICOLOR=0", "GIT_PAGER=", "PAGER="}, flags["stamp"] == "true")
 	if err != nil {
 		fmt.Fprintf(w, "bound run: capture failed: %v full: %s\n", err, captured.Path)
 		return 2
@@ -57,9 +57,13 @@ func Run(args []string, w io.Writer) int {
 	if captured.Error != "" {
 		status += " error=" + captured.Error
 	}
-	e.line(status)
+	tsStatus, tsHint := captured.timestampsNote()
+	e.line(status + " " + tsStatus)
 	e.raw(fmt.Sprintf("full: %s\n", path))
 	e.raw(fmt.Sprintf("status: %s.meta.json\n", path))
+	if tsHint != "" && total > lines {
+		e.line(tsHint)
+	}
 
 	// Green run of a recognised test runner: the per-package/per-test "ok" list
 	// is the least useful output there is. Keep the summary, keep the spill.

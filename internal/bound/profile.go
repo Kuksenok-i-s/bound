@@ -16,6 +16,7 @@ type logProfile struct {
 	ts      []float64 // seconds since first
 	t0      time.Time
 	untimed int
+	stamped bool // timestamps are bound's receive times (--stamp), not the source's
 }
 
 func (p *logProfile) add(t time.Time, ok bool) {
@@ -50,11 +51,21 @@ func autoBin(span float64, maxBins int) time.Duration {
 func (p *logProfile) render(e *envelope, l Limits, bin, gap time.Duration) {
 	e.section("profile")
 	e.line("about: arrival-time statistics of the selected lines, not their content; heuristic, parameters shown so the verdict can be checked; use it to pick the next --since/--grep, not as a root cause")
+	if p.stamped {
+		e.line("about: times are when bound received each line (--stamp), not when the program wrote it; block-buffered stdout arrives in bursts and a replayed log arrives all at once, so prefer the tool's own timestamps when it has them")
+	}
 	if len(p.ts) == 0 {
 		e.linef("events=0 untimed=%d; no leading timestamp recognised, profile unavailable", p.untimed)
 		return
 	}
 	sort.Float64s(p.ts)
+	if first := p.ts[0]; first != 0 {
+		// lines are not guaranteed to be in time order (merged streams, clock skew)
+		p.t0 = p.t0.Add(time.Duration(first * float64(time.Second)))
+		for i := range p.ts {
+			p.ts[i] -= first
+		}
+	}
 	span := p.ts[len(p.ts)-1]
 	if span <= 0 {
 		span = 1e-3

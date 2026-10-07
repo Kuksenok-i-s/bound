@@ -50,6 +50,10 @@ Reduce what enters context while retaining the evidence required to finish.
   Cascade → read the first events of a burst, the rest are consequences.
   Poisson-like → a per-bin threshold is enough. Verify the parameters printed on the
   `hawkes` line before quoting the verdict, and narrow with `--since`/`--grep`.
+- Captured output reports `timestamps=N/M`. At 0/M, time-based views need the tool's
+  own timestamp flag (preferred; the hook adds `docker -t`, `kubectl --timestamps`) or
+  `--stamp` for live streams only: it records when bound received a line, so buffered
+  stdout and replayed logs give misleading times.
 - Without bound, use targeted reads and host output limits while retaining full
   diagnostics and status on disk. Avoid dumping large spills into context.
 

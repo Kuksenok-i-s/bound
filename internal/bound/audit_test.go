@@ -31,6 +31,14 @@ func TestBoundAuditHelper(t *testing.T) {
 	case "timeout":
 		io.WriteString(os.Stdout, "PREFIX\n")
 		time.Sleep(5 * time.Second)
+	case "ticks":
+		// three unstamped lines 30ms apart, one with its own timestamp, one partial
+		for i := 0; i < 3; i++ {
+			io.WriteString(os.Stdout, "tick\n")
+			time.Sleep(30 * time.Millisecond)
+		}
+		io.WriteString(os.Stderr, "2026-01-01T00:00:00Z own-stamp\n")
+		io.WriteString(os.Stdout, "partial-no-newline")
 	case "pytest":
 		io.WriteString(os.Stdout, "WARNING dependency unavailable\nSKIPPED acceptance_login missing prerequisite\n"+strings.Repeat("routine\n", 20)+"================ 10 passed, 90 skipped in 0.1s ================\n")
 	}
@@ -268,6 +276,82 @@ func TestRegexSelectionRetainsCompleteHitCount(t *testing.T) {
 	var out bytes.Buffer
 	Read([]string{path, "--grep", "ERROR", "-C", "0"}, &out)
 	if !strings.Contains(out.String(), "matches=300 shown_lines=200 scan_complete=true truncated=true") {
+		t.Fatal(out.String())
+	}
+}
+
+func TestCaptureReportsTimestampCoverageAndHint(t *testing.T) {
+	dir := isolatedAudit(t)
+	var out bytes.Buffer
+	if code := Log(append([]string{"--tail", "10"}, helperArgs("ticks")...), &out); code != 0 {
+		t.Fatal(code, out.String())
+	}
+	raw, c := readCapture(t, dir)
+	if c.Lines != 5 || c.Timed != 1 || c.Stamped != 0 || c.Stamp {
+		t.Fatalf("%+v", c)
+	}
+	if !strings.Contains(out.String(), "timestamps=1/5") || strings.Contains(out.String(), "hint:") {
+		t.Fatal(out.String())
+	}
+	if string(raw) != "tick\ntick\ntick\n2026-01-01T00:00:00Z own-stamp\npartial-no-newline" {
+		t.Fatalf("spill altered without --stamp: %q", raw)
+	}
+
+	out.Reset()
+	if code := Log(append([]string{"--tail", "10"}, helperArgs("short")...), &out); code != 7 {
+		t.Fatal(code, out.String())
+	}
+	if !strings.Contains(out.String(), "timestamps=0/1") || !strings.Contains(out.String(), "hint: no leading timestamps") {
+		t.Fatal(out.String())
+	}
+}
+
+func TestStampPrefixesReceiveTimeOnlyWhereMissing(t *testing.T) {
+	dir := isolatedAudit(t)
+	var out bytes.Buffer
+	if code := Log(append([]string{"--stamp", "--profile"}, helperArgs("ticks")...), &out); code != 0 {
+		t.Fatal(code, out.String())
+	}
+	raw, c := readCapture(t, dir)
+	if c.Lines != 5 || c.Timed != 1 || c.Stamped != 4 || !c.Stamp {
+		t.Fatalf("%+v", c)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != 5 || lines[3] != "2026-01-01T00:00:00Z own-stamp" {
+		t.Fatalf("own timestamp must stay untouched: %q", lines)
+	}
+	var prev time.Time
+	for _, i := range []int{0, 1, 2, 4} {
+		stamp, rest, ok := strings.Cut(lines[i], " ")
+		at, err := time.Parse(time.RFC3339Nano, stamp)
+		if !ok || err != nil || (rest != "tick" && rest != "partial-no-newline") {
+			t.Fatalf("line %d not stamped verbatim: %q", i, lines[i])
+		}
+		if i < 3 && !prev.IsZero() && at.Sub(prev) < 20*time.Millisecond {
+			t.Fatalf("receive times not increasing: %v %v", prev, at)
+		}
+		if i < 3 {
+			prev = at
+		}
+	}
+	s := out.String()
+	for _, want := range []string{"timestamps=1/5 stamped=true(4)", "about: times are when bound received each line", "events=5 untimed=0"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("lost %q: %s", want, s)
+		}
+	}
+	if code := Log([]string{filepath.Join(dir, "x.log"), "--stamp"}, &out); code != 2 {
+		t.Fatal("--stamp on a file must fail", code)
+	}
+}
+
+func TestRunStampAndCoverageInStatus(t *testing.T) {
+	isolatedAudit(t)
+	var out bytes.Buffer
+	if code := Run(append([]string{"--stamp"}, helperArgs("ticks")...), &out); code != 0 {
+		t.Fatal(code, out.String())
+	}
+	if !strings.Contains(out.String(), "timestamps=1/5 stamped=true(4)") {
 		t.Fatal(out.String())
 	}
 }

@@ -26,8 +26,9 @@ var tsLayouts = []struct {
 // selected lines (rate per bin, duplicates, inter-arrival, Hawkes fit).
 func Log(args []string, w io.Writer) int {
 	l := DefaultLimits()
-	flags, pos, rest := parseFlags(args, "profile")
+	flags, pos, rest := parseFlags(args, "profile", "stamp")
 	profile := flags["profile"] == "true"
+	stamp := flags["stamp"] == "true"
 	defaultTail := l.LogTail
 	if profile {
 		defaultTail = 0
@@ -70,7 +71,7 @@ func Log(args []string, w io.Writer) int {
 			return 2
 		}
 		var captureErr error
-		captured, captureErr = captureCommand(rest, timeout, []string{"NO_COLOR=1", "TERM=dumb", "PAGER=cat", "SYSTEMD_PAGER=cat"})
+		captured, captureErr = captureCommandStamped(rest, timeout, []string{"NO_COLOR=1", "TERM=dumb", "PAGER=cat", "SYSTEMD_PAGER=cat"}, stamp)
 		if captureErr != nil {
 			fmt.Fprintf(w, "bound log: capture failed: %v full: %s\n", captureErr, captured.Path)
 			return 2
@@ -78,6 +79,10 @@ func Log(args []string, w io.Writer) int {
 		path, label, exit = captured.Path, ShellQuote(rest), captured.Exit
 
 	} else if len(pos) > 0 {
+		if stamp {
+			fmt.Fprintln(w, "[bound log] --stamp applies to a captured command (bound log --stamp -- <cmd>), not to a file")
+			return 2
+		}
 		path, label = pos[0], pos[0]
 	} else {
 		fmt.Fprintln(os.Stderr, "usage: bound log <file> | -- <cmd...>  [--tail N] [--grep RE] [--since TS] [-C N]")
@@ -175,14 +180,21 @@ func Log(args []string, w io.Writer) int {
 	if !since.IsZero() {
 		hdr += " since=" + since.Format(time.RFC3339)
 	}
+	var tsHint string
 	if len(rest) > 0 {
 		hdr += fmt.Sprintf(" exit=%d timed_out=%v", exit, captured.TimedOut)
 		if captured.Error != "" {
 			hdr += " error=" + captured.Error
 		}
+		var tsStatus string
+		tsStatus, tsHint = captured.timestampsNote()
+		hdr += " " + tsStatus
 	}
 	e.line(hdr)
 	e.raw(fmt.Sprintf("full: %s\n", path))
+	if tsHint != "" {
+		e.line(tsHint)
+	}
 	if s.Err() != nil {
 		e.linef("incomplete=true read_error=%v", s.Err())
 		if exit == 0 {
@@ -196,6 +208,7 @@ func Log(args []string, w io.Writer) int {
 		e.raw(fmt.Sprintf("status: %s.meta.json\n", path))
 	}
 	if profile {
+		prof.stamped = stamp && captured.Stamped > 0
 		prof.render(e, l, bin, gap)
 	}
 	e.lines(keep)
